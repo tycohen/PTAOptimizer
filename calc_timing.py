@@ -283,5 +283,36 @@ if __name__ == '__main__':
                 gainmodel=None,
                 gainexp=None)
 
+    print('Timing DSA2000 with full array for 30 min')
+    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
+    calc_timing(pta,
+                dsa2k_nus,
+                rxspecfile="DSA2K_full.txt",
+                t_int=1800.,
+                dec_lim=(90., -30.),
+                lat=37.23,
+                gainmodel=None,
+                gainexp=None)
+
+    print('Timing DSA2000 with half array for 60 min')
+    calc_timing(pta,
+                dsa2k_nus,
+                rxspecfile="DSA2K_half.txt",
+                t_int=3600.,
+                dec_lim=(90., -30.),
+                lat=37.23,
+                gainmodel=None,
+                gainexp=None)
+
+    print('Timing DSA2000 with quarter array for 120 min')  
+    calc_timing(pta,
+                dsa2k_nus,
+                rxspecfile="DSA2K_quarter.txt",
+                t_int=7200.,
+                dec_lim=(90., -30.),
+                lat=37.23,
+                gainmodel=None,
+                gainexp=None)
+
     with open('NG15yr.pta', 'wb') as ptaf:
         cPickle.dump(pta, ptaf)
