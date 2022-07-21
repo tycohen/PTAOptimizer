@@ -314,5 +314,16 @@ if __name__ == '__main__':
                 gainmodel=None,
                 gainexp=None)
 
+    print('Timing DSA2000 with full array for 60 min')
+    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
+    calc_timing(pta,
+                dsa2k_nus,
+                rxspecfile="DSA2K_full_60min.txt",
+                t_int=3600.,
+                dec_lim=(90., -30.),
+                lat=37.23,
+                gainmodel=None,
+                gainexp=None)
+    
     with open('NG15yr.pta', 'wb') as ptaf:
         cPickle.dump(pta, ptaf)
