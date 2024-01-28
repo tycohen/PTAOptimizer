@@ -93,3 +93,19 @@ class PTA(object):
         with open(filename, 'wb') as f:
             f.write(all_lines)
         return
+
+    def write_2best_to_markdown(self, filename, exclude=[]):
+        valid_extensions = (".md", ".markdown")
+        if not filename.endswith(valid_extensions):
+            raise ValueError("'filename' must end with {}".format(valid_extensions))
+        header = """
+|  Pulsar |   Best Telescope(s)     |Total RMS (&mu;s)|   2nd Best Telescope(s)     |Total RMS (&mu;s)|
+|---------|-------------------------|-----------------|-------------------------|-----------------|
+"""
+        rows = []
+        for t in sorted(self.sigma_2best(exclude=exclude),
+                        key=lambda x: x[0]):
+            rows.append("| {} | {} | {:.4f} | {} | {:.4f} |".format(*t))
+        with open(filename, "w") as f:
+            f.write(header + "\n".join(rows))
+        return
