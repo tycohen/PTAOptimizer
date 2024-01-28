@@ -57,7 +57,15 @@ class PTA(object):
         Get the best and 2nd instrument for each pulsar
         and return list of tuples of (pulsar name, instrument, % diff)
         Set exclude = list of substrings to ignore a particular telescope
+        
+        Parameters
+        ----------
+        exclude : list
+                  list of telescope name substrings to exclude
         """
+        if not isinstance(exclude, list):
+            raise TypeError("'exclude' must be a list of substrings not "
+                            "{}".format(type(exclude)))
         best_instr_list = []
         for p in self.psrlist:
             sigmas_sorted = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
