@@ -20,7 +20,7 @@ def calc_timing(pta,
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
     for p in pta.psrlist:
-        scope = Telescope(name=path.basename(rxspecfile).strip(".txt"),
+        scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
                           dec_lim=dec_lim,
                           lat=lat,
                           gainmodel=gainmodel,
