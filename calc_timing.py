@@ -1,5 +1,6 @@
 import cPickle
 import numpy as np
+from os import path
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import frequencyoptimizer as fop
@@ -19,7 +20,7 @@ def calc_timing(pta,
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
     for p in pta.psrlist:
-        scope = Telescope(name=rxspecfile.strip(".txt"),
+        scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
                           dec_lim=dec_lim,
                           lat=lat,
                           gainmodel=gainmodel,
@@ -56,6 +57,7 @@ def calc_timing(pta,
                                              T_rx=scope_noise_init.get_T_rx(nus),
                                              epsilon=scope_noise_init.get_epsilon(nus),
                                              T=scope_noise_init.T)
+            p.telescope_noise.update({scope.name : scope_noise})
             pulsar_noise = fop.PulsarNoise('', 
                                            alpha=-1 * p.spindex,
                                            dtd=p.dtd,
@@ -117,7 +119,7 @@ def chime_only(write=False):
     chime_timefac = np.full(len(chime_nus), 1.)
     calc_timing(pta,
                 chime_nus,
-                rxspecfile="CHIME.txt",
+                rxspecfile="./rxspecs/CHIME.txt",
                 dec_lim=(90., -35.),
                 lat=49.32,
                 gainmodel='cos',
@@ -141,7 +143,7 @@ if __name__ == '__main__':
     aoLS_nus = np.sort(np.concatenate([LbandSlo_nus, Shi_nus]))
     calc_timing(pta,
                 aoLS_nus,
-                rxspecfile="AO_Lwide_Swide_logain.txt",
+                rxspecfile="./rxspecs/AO_Lwide_Swide_logain.txt",
                 dec_lim=(39., 0.),
                 t_int=1800.,
                 lat=18.44,
@@ -154,7 +156,7 @@ if __name__ == '__main__':
     ao430L_nus = np.concatenate([nus_ao430, nus_aoL])
     calc_timing(pta,
                 ao430L_nus,
-                rxspecfile="AO_430_Lwide_logain.txt",
+                rxspecfile="./rxspecs/AO_430_Lwide_logain.txt",
                 t_int=1800.,
                 dec_lim=(39., 0.),
                 lat=18.44,
@@ -167,7 +169,7 @@ if __name__ == '__main__':
     gbt80012_nus = np.concatenate([nus_gb800, nus_gb1_2])
     calc_timing(pta,
                 gbt80012_nus,
-                rxspecfile="GBT_Rcvr_800-Rcvr_1_2_logain.txt",
+                rxspecfile="./rxspecs/GBT_Rcvr_800-Rcvr_1_2_logain.txt",
                 t_int=1800.,
                 dec_lim=(90., -46.),
                 lat=38.42,
@@ -179,7 +181,7 @@ if __name__ == '__main__':
     gbL_vlaS_nus = np.concatenate([nus_gb1_2, vlaS_nus])
     calc_timing(pta,
                 gbL_vlaS_nus,
-                rxspecfile="GBT_Rcvr_1_2_VLAS_logain.txt",
+                rxspecfile="./rxspecs/GBT_Rcvr_1_2_VLAS_logain.txt",
                 t_int=1800.,
                 dec_lim=(90., -46.),
                 lat=38.42,
@@ -195,7 +197,7 @@ if __name__ == '__main__':
                                          np.full(len(nus_gb1_2), 0.)])
     calc_timing(pta,
                 chime_gbtL_nus,
-                rxspecfile="CHIME-GBTL_logain.txt",
+                rxspecfile="./rxspecs/CHIME-GBTL_logain.txt",
                 dec_lim=(90., -20.),
                 lat=49.32,
                 gainmodel='cos',
@@ -217,7 +219,7 @@ if __name__ == '__main__':
                                          np.full(len(gbuwb_nus), 0.)])
     calc_timing(pta,
                 chime_uwbr_nus,
-                rxspecfile="CHIME-GBTUWBR.txt",
+                rxspecfile="./rxspecs/CHIME-GBTUWBR.txt",
                 dec_lim=(90., -20.),
                 lat=49.32,
                 gainmodel='cos',
@@ -324,6 +326,6 @@ if __name__ == '__main__':
                 lat=37.23,
                 gainmodel=None,
                 gainexp=None)
-    
+
     with open('NG15yr.pta', 'wb') as ptaf:
         cPickle.dump(pta, ptaf)

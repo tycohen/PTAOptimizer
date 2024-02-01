@@ -57,7 +57,15 @@ class PTA(object):
         Get the best and 2nd instrument for each pulsar
         and return list of tuples of (pulsar name, instrument, % diff)
         Set exclude = list of substrings to ignore a particular telescope
+        
+        Parameters
+        ----------
+        exclude : list
+                  list of telescope name substrings to exclude
         """
+        if not isinstance(exclude, list):
+            raise TypeError("'exclude' must be a list of substrings not "
+                            "{}".format(type(exclude)))
         best_instr_list = []
         for p in self.psrlist:
             sigmas_sorted = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
@@ -84,4 +92,20 @@ class PTA(object):
         all_lines = "\n".join(lines)
         with open(filename, 'wb') as f:
             f.write(all_lines)
+        return
+
+    def write_2best_to_markdown(self, filename, exclude=[]):
+        valid_extensions = (".md", ".markdown")
+        if not filename.endswith(valid_extensions):
+            raise ValueError("'filename' must end with {}".format(valid_extensions))
+        header = """
+|  Pulsar |   Best Telescope(s)     |Total RMS (&mu;s)|   2nd Best Telescope(s)     |Total RMS (&mu;s)|
+|---------|-------------------------|-----------------|-------------------------|-----------------|
+"""
+        rows = []
+        for t in sorted(self.sigma_2best(exclude=exclude),
+                        key=lambda x: x[0]):
+            rows.append("| {} | {} | {:.4f} | {} | {:.4f} |".format(*t))
+        with open(filename, "w") as f:
+            f.write(header + "\n".join(rows))
         return
