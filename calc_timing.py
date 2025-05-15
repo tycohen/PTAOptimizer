@@ -1,6 +1,9 @@
 import cPickle
+import functools
 import numpy as np
 from os import path
+from mock import patch, mock_open
+from io import StringIO
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import frequencyoptimizer as fop
@@ -129,203 +132,103 @@ def chime_only(write=False):
         with open('NG15yr_CHIMEonly.pta', 'wb') as ptaf:
             cPickle.dump(pta, ptaf)
     return pta
-    
+
+# Decorator for patching FrequencyOptimizer.TelescopeNoise.get_rxspecs (mocks open)
+def patch_open_in_get_rxspecs(target_file, fake_data):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(self, *args, **kwargs):
+            if getattr(self, 'rxspecfile', None) == target_file:
+                with patch('frequencyoptimizer.open',
+                           mock_open(read_data=fake_data),
+                           create=True):
+                    return func(self, *args, **kwargs)
+            else:
+                return func(self, *args, **kwargs)
+        return wrapped
+    return decorator                                                                 
+
+# Decorator for patching FrequencyOptimizer.TelescopeNoise.__init__
+# (mocks isfile and abspath)
+def patch_telnoise_init(target_file):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(self, *args, **kwargs):
+            if kwargs.get('rxspecfile') == target_file:
+                with patch('frequencyoptimizer.os.path.isfile',
+                           return_value=True), \
+                     patch('frequencyoptimizer.os.path.abspath',
+                           lambda x: x):
+                     return func(self, *args, **kwargs)
+            else:
+                return func(self, *args, **kwargs)
+        return wrapped
+    return decorator   
+
 if __name__ == '__main__':
     """
     'Main' function; calculate sigmas for multiple telescope configs
     and writes out to .pta file. File is overwritten each time.
     """
-    with open('NG15yr.pta', 'rb') as ptaf:
+    with open('NG20yr-DSA.pta', 'rb') as ptaf:
         pta = cPickle.load(ptaf)
-    print('Timing AO L-S')
-    LbandSlo_nus = np.arange(1.44 - .618 / 2, 1.868, 0.011)
-    Shi_nus = np.arange(2.227 - .354 / 2, 2.227 + .354 / 2, 0.01)[:-1]
-    aoLS_nus = np.sort(np.concatenate([LbandSlo_nus, Shi_nus]))
-    calc_timing(pta,
-                aoLS_nus,
-                rxspecfile="./rxspecs/AO_Lwide_Swide_logain.txt",
-                dec_lim=(39., 0.),
-                t_int=1800.,
-                lat=18.44,
-                gainmodel=None,
-                gainexp=None)
 
-    print('Timing AO 430-L')
-    nus_ao430 = np.arange(.432 - .02 / 2, .432 + .02 / 2, 0.00125)[:-1]
-    nus_aoL = np.arange(1.44 - .58 / 2, 1.44 + .58 / 2, 0.00125)[:-1]
-    ao430L_nus = np.concatenate([nus_ao430, nus_aoL])
+    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
+    t_int = 3600.
+    print('Timing DSA1650 with Full Array for {} min/psr'.format(t_int / 60.))
     calc_timing(pta,
-                ao430L_nus,
-                rxspecfile="./rxspecs/AO_430_Lwide_logain.txt",
-                t_int=1800.,
-                dec_lim=(39., 0.),
-                lat=18.44,
+                dsa2k_nus,
+                rxspecfile="rxspecs/DSA1650.txt",
+                t_int=t_int,
+                dec_lim=(90., -30.),
+                lat=37.23,
                 gainmodel=None,
                 gainexp=None)
     
-    print('Timing GB 800-1200')
-    nus_gb800 = np.arange(.820 - .200 / 2, .820 + .200 / 2, 0.009)
-    nus_gb1_2 = np.arange(1.510 - .800 / 2, 1.510 + .800 / 2, 0.009)[:-1]
-    gbt80012_nus = np.concatenate([nus_gb800, nus_gb1_2])
-    calc_timing(pta,
-                gbt80012_nus,
-                rxspecfile="./rxspecs/GBT_Rcvr_800-Rcvr_1_2_logain.txt",
-                t_int=1800.,
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing GBT-L + VLA-S')
-    vlaS_nus = np.arange(3. - 2. / 2., 3. + 2. / 2., 0.009)
-    gbL_vlaS_nus = np.concatenate([nus_gb1_2, vlaS_nus])
-    calc_timing(pta,
-                gbL_vlaS_nus,
-                rxspecfile="./rxspecs/GBT_Rcvr_1_2_VLAS_logain.txt",
-                t_int=1800.,
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing CHIME + GBT-L')
-    chime_nus = np.arange(0.6 - 0.4 / 2., 0.6 + 0.4 / 2., 0.009)[:-1]
-    chime_gbtL_nus = np.concatenate([chime_nus, nus_gb1_2])
-    chime_gbtL_gainexp = np.concatenate([np.full(len(chime_nus), 1.),
-                                         np.full(len(nus_gb1_2), 0.)])
-    chime_gbtL_timefac = np.concatenate([np.full(len(chime_nus), 1.),
-                                         np.full(len(nus_gb1_2), 0.)])
-    calc_timing(pta,
-                chime_gbtL_nus,
-                rxspecfile="./rxspecs/CHIME-GBTL_logain.txt",
-                dec_lim=(90., -20.),
-                lat=49.32,
-                gainmodel='cos',
-                gainexp=chime_gbtL_gainexp,
-                timefac=chime_gbtL_timefac)
-
-    print('Timing CHIME + UWBR')
-    gbuwb_ctrfreq = 2.35 #GHz
-    gbuwb_bw = 3.3 # GHz
-    gbuwb_nus = np.arange(gbuwb_ctrfreq - gbuwb_bw / 2,
-                        gbuwb_ctrfreq + gbuwb_bw / 2,
-                        0.009)[:-1]
-    chime_lt_uwbr_nus = chime_nus[chime_nus < gbuwb_nus[0]]
-    chime_uwbr_nus = np.concatenate([chime_lt_uwbr_nus,
-                                     gbuwb_nus])
-    chime_uwbr_gainexp = np.concatenate([np.full(len(chime_lt_uwbr_nus), 1.),
-                                         np.full(len(gbuwb_nus), 0.)])
-    chime_uwbr_timefac = np.concatenate([np.full(len(chime_lt_uwbr_nus), 1.),
-                                         np.full(len(gbuwb_nus), 0.)])
-    calc_timing(pta,
-                chime_uwbr_nus,
-                rxspecfile="./rxspecs/CHIME-GBTUWBR.txt",
-                dec_lim=(90., -20.),
-                lat=49.32,
-                gainmodel='cos',
-                gainexp=chime_uwbr_gainexp,
-                timefac=chime_uwbr_timefac)
-
-    print('Timing GB140ft 400-800 MHz')
-    gb140lo_nus = np.arange(.4, .8, .009)
-    calc_timing(pta,
-                gb140lo_nus,
-                rxspecfile="GB140_400-800.txt",
-                t_int=1.08e5,
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing GB140ft 1.3-1.8 GHz')
-    gb140L_nus = np.arange(1.3, 1.8, .009)
-    calc_timing(pta,
-                gb140L_nus,
-                rxspecfile="GB140_LBand.txt",
-                t_int=1.08e5,
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing CHIME + GB140ft L-band')
-    chime_gb140L_nus = np.concatenate([chime_nus,
-                                       gb140L_nus])
-    chime_gb140L_gainexp = np.concatenate([np.full(len(chime_nus), 1.),
-                                         np.full(len(gb140L_nus), 0.)])
-    chime_gb140L_timefac = np.concatenate([np.full(len(chime_nus), 1.),
-                                         np.full(len(gb140L_nus), 0.)])
-    calc_timing(pta,
-                chime_gb140L_nus,
-                rxspecfile="CHIME-GB140Lband_logain.txt",
-                dec_lim=(90., -20.),
-                lat=49.32,
-                gainmodel='cos',
-                gainexp=chime_gb140L_gainexp,
-                timefac=chime_gb140L_timefac)
-
-    print('Timing GB140ft 400-800 MHz + GBT-L')
-    gb140lo_gbtL_nus = np.concatenate([gb140lo_nus, nus_gb1_2])
-    calc_timing(pta,
-                gb140lo_gbtL_nus,
-                rxspecfile="GB140_400-800_GBTLband.txt",
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing GB140ft 400-800 MHz + UWBR')
-    gb140lo_uwbr_nus = np.concatenate([gb140lo_nus[gb140lo_nus < gbuwb_nus[0]],
-                                       gbuwb_nus])
-    calc_timing(pta,
-                gb140lo_uwbr_nus,
-                rxspecfile="GB140_400-800_GBTUWBR.txt",
-                dec_lim=(90., -46.),
-                lat=38.42,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing DSA2000 with full array for 30 min')
-    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
-    calc_timing(pta,
-                dsa2k_nus,
-                rxspecfile="DSA2K_full.txt",
-                t_int=1800.,
-                dec_lim=(90., -30.),
-                lat=37.23,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing DSA2000 with half array for 60 min')
-    calc_timing(pta,
-                dsa2k_nus,
-                rxspecfile="DSA2K_half.txt",
-                t_int=3600.,
-                dec_lim=(90., -30.),
-                lat=37.23,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing DSA2000 with quarter array for 120 min')  
-    calc_timing(pta,
-                dsa2k_nus,
-                rxspecfile="DSA2K_quarter.txt",
-                t_int=7200.,
-                dec_lim=(90., -30.),
-                lat=37.23,
-                gainmodel=None,
-                gainexp=None)
-
-    print('Timing DSA2000 with full array for 60 min')
-    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
-    calc_timing(pta,
-                dsa2k_nus,
-                rxspecfile="DSA2K_full_60min.txt",
-                t_int=3600.,
-                dec_lim=(90., -30.),
-                lat=37.23,
-                gainmodel=None,
-                gainexp=None)
-
-    with open('NG15yr.pta', 'wb') as ptaf:
-        cPickle.dump(pta, ptaf)
+    rx_freq = pta.psrlist[0].telescope_noise["DSA1650"].rx_nu
+    rx_eps = pta.psrlist[0].telescope_noise["DSA1650"].epsilon
+    rx_Trx = pta.psrlist[0].telescope_noise["DSA1650"].T_rx
+    rx_gain = pta.psrlist[0].telescope_noise["DSA1650"].gain
+    sigma_tots = np.array([p.sigmas["DSA1650"]["sigma_tot"]
+                           for p in pta.psrlist])
+    tint_fac = 1
+    n_improve = 1
+    while n_improve > 0:
+        rx_gain /= 2. # A / 2
+        t_int *= 2. # 2 * T
+        tint_fac *= 2
+        instr_name = "DSA1650 A-div-{} {}*T".format(tint_fac,
+                                                tint_fac)
+        colstack = np.column_stack([rx_freq, rx_Trx, rx_gain, rx_eps])
+        rxfile_buf = StringIO()
+        np.savetxt(rxfile_buf,
+                   colstack,
+                   header="Freq	Trx	G	eps",
+                   delimiter="\t",
+                   fmt="%.6f")
+        mock_rxspec_content = rxfile_buf.getvalue()
+        # mock incrementally reduced gain rxspecfile input
+        fop.TelescopeNoise.get_rxspecs = patch_open_in_get_rxspecs(instr_name,
+                                                                   mock_rxspec_content)(
+            fop.TelescopeNoise.get_rxspecs
+        )
+        fop.TelescopeNoise.__init__ = patch_telnoise_init(instr_name)(
+            fop.TelescopeNoise.__init__
+        )
+        print('Timing {}'.format(instr_name))
+        calc_timing(pta,
+                    dsa2k_nus,
+                    rxspecfile=instr_name,
+                    t_int=t_int,
+                    dec_lim=(90., -30.),
+                    lat=37.23,
+                    gainmodel=None,
+                    gainexp=None)
+        sigma_tots_new = np.array([p.sigmas[instr_name]["sigma_tot"]
+                                   for p in pta.psrlist])
+        n_improve = np.sum((sigma_tots - sigma_tots_new) > 0)
+        print("{} psrs improved".format(n_improve))
+        sigma_tots = sigma_tots_new
+        
+    # with open('NG20yr-DSA.pta', 'wb') as ptaf:
+    #     cPickle.dump(pta, ptaf)
