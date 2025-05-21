@@ -14,6 +14,8 @@ class Pulsar(object):
             dispersion measure in pc cm^-3
     dec : float
             declination in degrees
+    ra : float
+            right ascension in degrees
     dtd : float
             scintillation timescale in seconds
     dnud : float
@@ -51,6 +53,7 @@ class Pulsar(object):
                  period=None,
                  dm=None,
                  dec=None,
+                 ra=None,
                  dtd=None,
                  dnud=None,
                  taud=None,
@@ -75,6 +78,7 @@ class Pulsar(object):
         self.period = period
         self.dm = dm
         self.dec = dec
+        self.ra = ra
         self.dtd = dtd
         self.dnud = dnud
         self.taud = taud
