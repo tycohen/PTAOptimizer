@@ -230,5 +230,5 @@ if __name__ == '__main__':
         print("{} psrs improved".format(n_improve))
         sigma_tots = sigma_tots_new
         
-    # with open('NG20yr-DSA.pta', 'wb') as ptaf:
-    #     cPickle.dump(pta, ptaf)
+    with open('NG20yr-DSA.pta', 'wb') as ptaf:
+        cPickle.dump(pta, ptaf)
