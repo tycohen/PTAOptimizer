@@ -46,7 +46,7 @@ class PTA(object):
         best_instr_list = []
         for p in self.psrlist:
             best_tup = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
-                               for k, v in p.sigmas.iteritems()
+                               for k, v in iter(p.sigmas.items())
                                if not any([e in k for e in exclude])],
                               key=lambda t: (t[2] < 0., t[2]))[0]
             best_instr_list.append(best_tup)
@@ -69,7 +69,7 @@ class PTA(object):
         best_instr_list = []
         for p in self.psrlist:
             sigmas_sorted = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
-                                    for k, v in p.sigmas.iteritems()
+                                    for k, v in iter(p.sigmas.items())
                                     if not any([e in k for e in exclude])],
                                    key=lambda t: (t[2] < 0., t[2]))
             best = sigmas_sorted[0]
@@ -90,7 +90,7 @@ class PTA(object):
              s = "\t".join([p.name] + [str(p.sigmas[k]['sigma_tot']) for k in key_names])
              lines.append(s)
         all_lines = "\n".join(lines)
-        with open(filename, 'wb') as f:
+        with open(filename, 'w') as f:
             f.write(all_lines)
         return
 
