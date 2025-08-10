@@ -1,5 +1,5 @@
 """
-Integration tests for Pulsar class
+Unit tests for Pulsar class
 """
 
 import unittest
