@@ -1,4 +1,4 @@
-import cPickle
+import pickle
 import numpy as np
 from os import path
 from astropy.coordinates import SkyCoord
@@ -110,7 +110,7 @@ def get_ctrfreq(nus):
 def chime_only(write=False):
     """Returns a CHIME-only pta.PTA object"""
     with open('NG15yr.pta', 'rb') as ptaf:
-        pta = cPickle.load(ptaf)
+        pta = pickle.load(ptaf, encoding="latin1")
     for p in pta.psrlist:   # reset the sigma dicts to being empty
         p.sigmas = {}
     print('Timing CHIME')
@@ -127,7 +127,7 @@ def chime_only(write=False):
                 timefac=chime_timefac)
     if write:
         with open('NG15yr_CHIMEonly.pta', 'wb') as ptaf:
-            cPickle.dump(pta, ptaf)
+            pickle.dump(pta, ptaf)
     return pta
     
 if __name__ == '__main__':
@@ -136,7 +136,7 @@ if __name__ == '__main__':
     and writes out to .pta file. File is overwritten each time.
     """
     with open('NG15yr.pta', 'rb') as ptaf:
-        pta = cPickle.load(ptaf)
+        pta = pickle.load(ptaf, encoding="latin1")
     print('Timing AO L-S')
     LbandSlo_nus = np.arange(1.44 - .618 / 2, 1.868, 0.011)
     Shi_nus = np.arange(2.227 - .354 / 2, 2.227 + .354 / 2, 0.01)[:-1]
@@ -227,4 +227,4 @@ if __name__ == '__main__':
                 timefac=chime_uwbr_timefac)
 
     with open('NG15yr.pta', 'wb') as ptaf:
-        cPickle.dump(pta, ptaf)
+        pickle.dump(pta, ptaf)
