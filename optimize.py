@@ -48,6 +48,7 @@ class OptimizeFrequency(object):
         self.nsteps = nsteps
         if not log_grid and dnu is None:
             raise ValueError("'dnu' must be set if log_grid = False")
+        self.dnu = dnu
         self.log_grid = log_grid
         self.frac_bw = frac_bw
         self.full_bandwidth = full_bandwidth
@@ -59,16 +60,16 @@ class OptimizeFrequency(object):
                 raise OSError("Directory '{}' does not exist.".format(plotdir))
         else:
             raise TypeError("'plotdir' must be a string")
-        if isinstance(levels, np.ndarray):
+        if isinstance(levels, (np.ndarray, type(None))):
             self.levels = levels
         else:
-            raise TypeError("'levels' must be a numpy.ndarray")            
-        if isinstance(colors, list):
+            raise TypeError("'levels' must be None or a numpy.ndarray")            
+        if isinstance(colors, (type(None), list)):
             self.colors = colors
         else:
-            raise TypeError("'colors' must be a list")
-        if isinstance(lws, list):
+            raise TypeError("'colors' must be None or a list")
+        if isinstance(lws, (type(None), list)):
             self.lws = lws
         else:
-            raise TypeError("'lws' must be a list")
+            raise TypeError("'lws' must be None or a list")
 
