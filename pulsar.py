@@ -47,7 +47,9 @@ class Pulsar(object):
     telescope_noise : dict
                 dictionary of FrequencyOptimizer.TelescopeNoise objects
                 for each instrument
-        """
+    optimum : dict
+              dictionary of optimized parameters for each instrument
+    """
     def __init__(self,
                  name=None,
                  period=None,
@@ -68,6 +70,7 @@ class Pulsar(object):
                  template=None,
                  sigmas=None,
                  telescope_noise=None,
+                 optimum={},
                  *args,
                  **kwargs):
         """
@@ -93,6 +96,7 @@ class Pulsar(object):
         self.template = template
         self.sigmas = {}
         self.telescope_noise = {}
+        self.optimum = optimum
 
     def sigma_jitter(self, t_int):
         """Return intrinsic jitter noise (in us)

@@ -6,7 +6,7 @@ import astropy.units as u
 import frequencyoptimizer as fop
 from PTAOptimizer.telescope import Telescope
 import PTAOptimizer.observatory_ops as oops
-
+from optimize import OptimizeFrequency
 
 def calc_timing(pta,
                 nus,
@@ -16,9 +16,13 @@ def calc_timing(pta,
                 lat=None,
                 gainmodel=None,
                 gainexp=None,
-                timefac=0.):
+                timefac=0.,
+                optimize_freq=None):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
+    if not isinstance(optimize_freq, (OptimizeFrequency, type(None))):
+        raise TypeError("If set, 'optimize_freq' must be "
+                        "None or optimize.OptimizeFrequency")
     for p in pta.psrlist:
         scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
                           dec_lim=dec_lim,
@@ -57,7 +61,6 @@ def calc_timing(pta,
                                              T_rx=scope_noise_init.get_T_rx(nus),
                                              epsilon=scope_noise_init.get_epsilon(nus),
                                              T=scope_noise_init.T)
-            p.telescope_noise.update({scope.name : scope_noise})
             pulsar_noise = fop.PulsarNoise('', 
                                            alpha=-1 * p.spindex,
                                            dtd=p.dtd,
@@ -75,15 +78,67 @@ def calc_timing(pta,
                                            glon=j2k_coords.galactic.b.degree,
                                            glat=j2k_coords.galactic.l.degree)
             gal_noise = fop.GalacticNoise()
-            fop_inst = fop.FrequencyOptimizer(pulsar_noise,
-                                              gal_noise,
-                                              scope_noise,
-                                              nchan=len(nus),
-                                              numax=get_ctrfreq(nus),
-                                              numin=get_ctrfreq(nus),
-                                              vverbose=False)
-            sigma_tup = fop_inst.calc_single(nus)
-            p.add_sigmas(scope.name, sigma_tup)
+            if optimize_freq is None:
+                fop_inst = fop.FrequencyOptimizer(pulsar_noise,
+                                                  gal_noise,
+                                                  scope_noise,
+                                                  nchan=len(nus),
+                                                  numax=get_ctrfreq(nus),
+                                                  numin=get_ctrfreq(nus),
+                                                  vverbose=False)
+                sigma_tup = fop_inst.calc_single(nus)
+                p.add_sigmas(scope.name, sigma_tup)
+            else: # optimize observing frequency within band
+                p.telescope_noise.update({scope.name : scope_noise})
+                fop_inst = fop.FrequencyOptimizer(pulsar_noise,
+                                                  gal_noise,
+                                                  scope_noise,
+                                                  nchan=len(nus),
+                                                  numax=max(nus + np.diff(nus)[0]),
+                                                  numin=min(nus),
+                                                  verbose=False,
+                                                  nsteps=optimize_freq.nsteps,
+                                                  dnu=optimize_freq.dnu,
+                                                  log=optimize_freq.log_grid)
+                fop_inst.calc()
+                ctr_opt, bw_opt = fop_inst.get_optimum()
+                numin_opt = ctr_opt - bw_opt / 2.
+                numax_opt = ctr_opt + bw_opt / 2.
+                p.optimum.update({scope.name + "_freqopt" : {"nu_min" : numin_opt,
+                                                             "nu_max" : numax_opt}})
+                # re-calculate sigmas in optimized band
+                nus_opt = np.linspace(numin_opt,
+                                      numax_opt,
+                                      len(nus) + 1)[:-1]
+                scope_noise_init_opt = fop.TelescopeNoise(1.,
+                                                          1.,
+                                                          T=t_int,
+                                                          rxspecfile=rxspecfile)
+                scope_noise_init_opt.gain = oops.get_gains(scope,
+                                            p.dec,
+                                            scope_noise_init_opt.get_gain(nus_opt))
+                if isinstance(timefac, np.ndarray):
+                    scope_noise_init_opt.T = get_tobs(
+                        scope_noise_init_opt.get_T(nus_opt),
+                        scope,
+                        p.dec)
+                else:
+                    scope_noise_init_opt.T = scope_noise_init_opt.get_T(nus_opt)
+                scope_noise_opt = fop.TelescopeNoise(rx_nu=nus_opt,
+                                    gain=scope_noise_init_opt.gain,
+                                    T_rx=scope_noise_init_opt.get_T_rx(nus_opt),
+                                    epsilon=scope_noise_init_opt.get_epsilon(nus_opt),
+                                    T=scope_noise_init_opt.T)
+                p.telescope_noise.update({scope.name + "_freqopt" : scope_noise_opt})
+                fop_inst_opt = fop.FrequencyOptimizer(pulsar_noise,
+                                                      gal_noise,
+                                                      scope_noise_opt,
+                                                      nchan=len(nus_opt),
+                                                      numax=max(nus_opt),
+                                                      numin=min(nus_opt),
+                                                      verbose=False)
+                sigma_tup = fop_inst_opt.calc_single(nus_opt)
+                p.add_sigmas(scope.name + "_freqopt", sigma_tup)
     return
 
 def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
