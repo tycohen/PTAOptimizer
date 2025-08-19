@@ -262,3 +262,9 @@ with open('NG15yr.pta', 'rb') as f:
 print(pta.best_sigma(exclude=["AO"]))
 ```
 
+## Testing
+To run all integration and unit tests, run
+```
+python -m pytest -vv
+```
+from the base directory.

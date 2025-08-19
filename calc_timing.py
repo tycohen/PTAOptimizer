@@ -1,8 +1,8 @@
-import cPickle
 import functools
+import pickle
 import numpy as np
 from os import path
-from mock import patch, mock_open
+from unittest.mock import patch, mock_open
 from io import StringIO
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -113,7 +113,7 @@ def get_ctrfreq(nus):
 def chime_only(write=False):
     """Returns a CHIME-only pta.PTA object"""
     with open('NG15yr.pta', 'rb') as ptaf:
-        pta = cPickle.load(ptaf)
+        pta = pickle.load(ptaf, encoding="latin1")
     for p in pta.psrlist:   # reset the sigma dicts to being empty
         p.sigmas = {}
     print('Timing CHIME')
@@ -130,7 +130,7 @@ def chime_only(write=False):
                 timefac=chime_timefac)
     if write:
         with open('NG15yr_CHIMEonly.pta', 'wb') as ptaf:
-            cPickle.dump(pta, ptaf)
+            pickle.dump(pta, ptaf)
     return pta
 
 # Decorator for patching FrequencyOptimizer.TelescopeNoise.get_rxspecs (mocks open)
@@ -171,7 +171,7 @@ if __name__ == '__main__':
     and writes out to .pta file. File is overwritten each time.
     """
     with open('NG20yr-DSA.pta', 'rb') as ptaf:
-        pta = cPickle.load(ptaf)
+        pta = pickle.load(ptaf, encoding="latin1")
 
     dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
     t_int = 3600.
@@ -231,4 +231,4 @@ if __name__ == '__main__':
         sigma_tots = sigma_tots_new
         
     with open('NG20yr-DSA.pta', 'wb') as ptaf:
-        cPickle.dump(pta, ptaf)
+        pickle.dump(pta, ptaf)
