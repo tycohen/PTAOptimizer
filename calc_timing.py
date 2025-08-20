@@ -139,6 +139,18 @@ def calc_timing(pta,
                                                       verbose=False)
                 sigma_tup = fop_inst_opt.calc_single(nus_opt)
                 p.add_sigmas(scope.name + "_freqopt", sigma_tup)
+
+                if optimize_freq.plot:
+                    plot_fname = "{}_{}.png".format(p.name,
+                                                    scope.name)
+                    fop_inst.plot(path.join(optimize_freq.plotdir,
+                                            plot_fname),
+                                  doshow=False,
+                                  levels=optimize_freq.levels,
+                                  colors=optimize_freq.colors,
+                                  lws=optimize_freq.lws,
+                                  minimum="k*",
+                                  cmap=cm.inferno_r)
     return
 
 def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
