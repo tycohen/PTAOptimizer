@@ -96,10 +96,14 @@ def calc_timing(pta,
                                                   nchan=len(nus),
                                                   numax=max(nus + np.diff(nus)[0]),
                                                   numin=min(nus),
+                                                  enforce_numax=True,
                                                   verbose=False,
                                                   nsteps=optimize_freq.nsteps,
                                                   dnu=optimize_freq.dnu,
-                                                  log=optimize_freq.log_grid)
+                                                  log=optimize_freq.log_grid,
+                                                  levels=optimize_freq.levels,
+                                                  colors=optimize_freq.colors,
+                                                  lws=optimize_freq.lws)
                 fop_inst.calc()
                 ctr_opt, bw_opt = fop_inst.get_optimum()
                 numin_opt = ctr_opt - bw_opt / 2.
@@ -146,11 +150,7 @@ def calc_timing(pta,
                     fop_inst.plot(path.join(optimize_freq.plotdir,
                                             plot_fname),
                                   doshow=False,
-                                  levels=optimize_freq.levels,
-                                  colors=optimize_freq.colors,
-                                  lws=optimize_freq.lws,
-                                  minimum="k*",
-                                  cmap=cm.inferno_r)
+                                  minimum="k*")
     return
 
 def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
