@@ -110,10 +110,10 @@ def calc_timing(pta,
                 numax_opt = ctr_opt + bw_opt / 2.
                 p.optimum.update({scope.name + "_freqopt" : {"nu_min" : numin_opt,
                                                              "nu_max" : numax_opt}})
+                numin_idx = np.argmin(np.abs(nus - numin_opt))
+                numax_idx = np.argmin(np.abs(nus - numax_opt))
                 # re-calculate sigmas in optimized band
-                nus_opt = np.linspace(numin_opt,
-                                      numax_opt,
-                                      len(nus) + 1)[:-1]
+                nus_opt = nus[numin_idx: numax_idx]
                 scope_noise_init_opt = fop.TelescopeNoise(1.,
                                                           1.,
                                                           T=t_int,
@@ -128,6 +128,7 @@ def calc_timing(pta,
                         p.dec)
                 else:
                     scope_noise_init_opt.T = scope_noise_init_opt.get_T(nus_opt)
+                pulsar_noise.sigma_Js = p.sigma_jitter(scope_noise_init_opt.T)
                 scope_noise_opt = fop.TelescopeNoise(rx_nu=nus_opt,
                                     gain=scope_noise_init_opt.gain,
                                     T_rx=scope_noise_init_opt.get_T_rx(nus_opt),
@@ -141,8 +142,8 @@ def calc_timing(pta,
                                                       numax=max(nus_opt),
                                                       numin=min(nus_opt),
                                                       verbose=False)
-                sigma_tup = fop_inst_opt.calc_single(nus_opt)
-                p.add_sigmas(scope.name + "_freqopt", sigma_tup)
+                sigma_tup_opt = fop_inst_opt.calc_single(nus_opt)
+                p.add_sigmas(scope.name + "_freqopt", sigma_tup_opt)
 
                 if optimize_freq.plot:
                     plot_fname = "{}_{}.png".format(p.name,
