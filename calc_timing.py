@@ -110,10 +110,10 @@ def calc_timing(pta,
                 numax_opt = ctr_opt + bw_opt / 2.
                 p.optimum.update({scope.name + "_freqopt" : {"nu_min" : numin_opt,
                                                              "nu_max" : numax_opt}})
-                numin_idx = np.argmin(np.abs(nus - numin_opt))
-                numax_idx = np.argmin(np.abs(nus - numax_opt))
                 # re-calculate sigmas in optimized band
-                nus_opt = nus[numin_idx: numax_idx]
+                nus_opt = np.linspace(numin_opt,
+                                      numax_opt,
+                                      len(nus) + 1)[:-1]
                 scope_noise_init_opt = fop.TelescopeNoise(1.,
                                                           1.,
                                                           T=t_int,
