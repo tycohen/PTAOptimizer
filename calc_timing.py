@@ -104,6 +104,12 @@ def calc_timing(pta,
                                                   levels=optimize_freq.levels,
                                                   colors=optimize_freq.colors,
                                                   lws=optimize_freq.lws)
+                # ensure full band is included in grid
+                B_full = fop_inst.numax - fop_inst.numin
+                C_full = fop_inst.numin + B_full / 2.
+                fop_inst.Cs = np.unique(np.sort(np.append(fop_inst.Cs, C_full)))
+                fop_inst.Bs = np.unique(np.sort(np.append(fop_inst.Bs, B_full)))
+                # get optimum ctr freq, BW
                 fop_inst.calc()
                 ctr_opt, bw_opt = fop_inst.get_optimum()
                 numin_opt = ctr_opt - bw_opt / 2.
