@@ -70,7 +70,7 @@ class Pulsar(object):
                  template=None,
                  sigmas=None,
                  telescope_noise=None,
-                 optimum={},
+                 optimum=None,
                  *args,
                  **kwargs):
         """
@@ -94,9 +94,12 @@ class Pulsar(object):
         self.sig_j_single = sig_j_single
         self.parfile = parfile
         self.template = template
-        self.sigmas = {}
-        self.telescope_noise = {}
-        self.optimum = optimum
+        self.sigmas = {} if sigmas is None else dict(sigmas)
+        if telescope_noise is None:
+            self.telescope_noise = {}
+        else:
+            self.telescope_noise = dict(telescope_noise)
+        self.optimum = {} if optimum is None else dict(optimum)
 
     def sigma_jitter(self, t_int):
         """Return intrinsic jitter noise (in us)
