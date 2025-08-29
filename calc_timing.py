@@ -103,7 +103,8 @@ def calc_timing(pta,
                                                   log=optimize_freq.log_grid,
                                                   levels=optimize_freq.levels,
                                                   colors=optimize_freq.colors,
-                                                  lws=optimize_freq.lws)
+                                                  lws=optimize_freq.lws,
+                                                  ncpu=optimize_freq.ncpu)
                 # ensure full band is included in grid
                 B_full = fop_inst.numax - fop_inst.numin
                 C_full = fop_inst.numin + B_full / 2.

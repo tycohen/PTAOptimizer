@@ -28,7 +28,8 @@ class OptimizeFrequency(object):
             List of contour colors for plotting
     lws: list
          List of contour linewidths for plotting
-
+    ncpu: int
+          Number of cpus to use for parallel computing
     """
     def __init__(self,
                  nsteps=20,
@@ -40,7 +41,8 @@ class OptimizeFrequency(object):
                  plotdir=".",
                  levels=None,
                  colors=None,
-                 lws=None):
+                 lws=None,
+                 ncpu=1):
         """
         ___init___ function for the OptimizeFrequency class
         """
@@ -52,6 +54,7 @@ class OptimizeFrequency(object):
         self.log_grid = log_grid
         self.frac_bw = frac_bw
         self.full_bandwidth = full_bandwidth
+        self.ncpu = ncpu
         self.plot = plot
         if isinstance(plotdir, str):
             if path.isdir(plotdir):
