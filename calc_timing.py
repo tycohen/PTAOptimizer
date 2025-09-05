@@ -79,6 +79,7 @@ def calc_timing(pta,
                                            glat=j2k_coords.galactic.l.degree)
             gal_noise = fop.GalacticNoise()
             if optimize_freq is None:
+                p.telescope_noise.update({scope.name : scope_noise})
                 fop_inst = fop.FrequencyOptimizer(pulsar_noise,
                                                   gal_noise,
                                                   scope_noise,
@@ -89,7 +90,6 @@ def calc_timing(pta,
                 sigma_tup = fop_inst.calc_single(nus)
                 p.add_sigmas(scope.name, sigma_tup)
             else: # optimize observing frequency within band
-                p.telescope_noise.update({scope.name : scope_noise})
                 fop_inst = fop.FrequencyOptimizer(pulsar_noise,
                                                   gal_noise,
                                                   scope_noise,
