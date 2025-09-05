@@ -1,12 +1,19 @@
+import os
+# avoid BLAS oversubscription in each worker
+for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(var, "1")
 import pickle
 import numpy as np
 from os import path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import frequencyoptimizer as fop
 from PTAOptimizer.telescope import Telescope
 import PTAOptimizer.observatory_ops as oops
 from optimize import OptimizeFrequency
+
 
 def calc_timing(pta,
                 nus,
@@ -17,149 +24,185 @@ def calc_timing(pta,
                 gainmodel=None,
                 gainexp=None,
                 timefac=0.,
-                optimize_freq=None):
+                optimize_freq=None,
+                max_workers=None):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
     if not isinstance(optimize_freq, (OptimizeFrequency, type(None))):
         raise TypeError("If set, 'optimize_freq' must be "
                         "None or optimize.OptimizeFrequency")
-    for p in pta.psrlist:
-        scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
-                          dec_lim=dec_lim,
-                          lat=lat,
-                          gainmodel=gainmodel,
-                          gainexp=gainexp)
-        scope.timefac = timefac
-        ra_str = p.name[1:3] + 'h' + p.name[3:5] + 'm' # get RA from Jname
-        j2k_coords = SkyCoord(ra=ra_str, dec=p.dec*u.deg, frame='icrs')
-        # initial scope noise to get the rx specs
-        scope_noise_init = fop.TelescopeNoise(1.,
-                                              1.,
-                                              T=t_int,
-                                              rxspecfile=rxspecfile)
-        scope_noise_init.gain = oops.get_gains(scope,
-                                               p.dec,
-                                               scope_noise_init.get_gain(nus))
-        if 0. in scope_noise_init.gain:
-            # if any gains are zero, psr below at least 1 scopes horizon
-            p.add_sigmas(scope.name, (-2, -2, -2, -2, -2))
-            continue
+    if optimize_freq is not None and optimize_freq.ncpu > 1:
+        raise ValueError("ncpu for FrequencyOptimizer must be 1"
+                         " when parallelizing over pulsars")
+    if max_workers is None:
+        max_workers = max(1, (os.cpu_count() or 1) - 2)
+
+    futures = []
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        for p in pta.psrlist:
+            futures.append(ex.submit(
+                time_single_pulsar, p, nus, rxspecfile, t_int, dec_lim, lat,
+                gainmodel, gainexp, timefac, optimize_freq
+            ))
+        
+        for fut in as_completed(futures):
+            psrname, instr_name, sigma_tup, telnoise, optimum_dict = fut.result()
+            p = pta.get_single_pulsar(psrname)
+            p.add_sigmas(instr_name, sigma_tup)
+            try:
+                p.optimum.update(optimum_dict)
+            except AttributeError:
+                pass
+            p.telescope_noise.update({instr_name : telnoise})
+                
+def time_single_pulsar(p, nus, rxspecfile, t_int, dec_lim, lat,
+                       gainmodel=None, gainexp=None, timefac=0.,
+                       optimize_freq=None):
+    """
+    Single pulsar TOA uncertainty calculator
+
+    Returns
+    -------
+    pulsar name: str
+    instrument name: str
+    tuple of TOA noise components
+    scope noise: frequencyoptimizer.TelescopeNoise
+    optimum: dict of optimized observing parameters
+    """
+    scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
+                      dec_lim=dec_lim,
+                      lat=lat,
+                      gainmodel=gainmodel,
+                      gainexp=gainexp)
+    scope.timefac = timefac
+    ra_str = p.name[1:3] + 'h' + p.name[3:5] + 'm' # get RA from Jname
+    j2k_coords = SkyCoord(ra=ra_str, dec=p.dec*u.deg, frame='icrs')
+    # initial scope noise to get the rx specs
+    scope_noise_init = fop.TelescopeNoise(1.,
+                                          1.,
+                                          T=t_int,
+                                          rxspecfile=rxspecfile)
+    scope_noise_init.gain = oops.get_gains(scope,
+                                           p.dec,
+                                           scope_noise_init.get_gain(nus))
+    if 0. in scope_noise_init.gain:
+        # if any gains are zero, psr below at least 1 scopes horizon
+        return p.name, scope.name, (-2, -2, -2, -2, -2), scope_noise_init, {}
+    else:
+        if isinstance(timefac, np.ndarray):
+            scope_noise_init.T = get_tobs(scope_noise_init.get_T(nus),
+                                     scope,
+                                     p.dec)
         else:
+            scope_noise_init.T = scope_noise_init.get_T(nus)
+        # if 0. in scope_noise_init.T:
+        #     print('Zero in scope_noise_init.T : {}'.format(scope_noise_init.T))
+        #     print('Gain = {}'.format(scope_noise_init.gain))
+
+        # re-initialize telescope noise with dec-dependent gains, int time
+        scope_noise = fop.TelescopeNoise(rx_nu=nus,
+                                         gain=scope_noise_init.gain,
+                                         T_rx=scope_noise_init.get_T_rx(nus),
+                                         epsilon=scope_noise_init.get_epsilon(nus),
+                                         T=scope_noise_init.T)
+        pulsar_noise = fop.PulsarNoise('', 
+                                       alpha=-1 * p.spindex,
+                                       dtd=p.dtd,
+                                       dnud=p.dnud,
+                                       taud=p.taud,
+                                       C1=1.16,
+                                       I_0=p.s_1000,
+                                       DM=p.dm,
+                                       D=p.dist,
+                                       tauvar=0.5 * p.taud,
+                                       Weffs=p.weff,
+                                       W50s=p.w50,
+                                       Uscale=p.uscale,
+                                       sigma_Js=p.sigma_jitter(scope_noise.T),
+                                       glon=j2k_coords.galactic.b.degree,
+                                       glat=j2k_coords.galactic.l.degree)
+        gal_noise = fop.GalacticNoise()
+        if optimize_freq is None:
+            fop_inst = fop.FrequencyOptimizer(pulsar_noise,
+                                              gal_noise,
+                                              scope_noise,
+                                              nchan=len(nus),
+                                              numax=get_ctrfreq(nus),
+                                              numin=get_ctrfreq(nus),
+                                              vverbose=False)
+            sigma_tup = fop_inst.calc_single(nus)
+            return p.name, scope.name, sigma_tup, scope_noise, {}
+        else: # optimize observing frequency within band
+            fop_inst = fop.FrequencyOptimizer(pulsar_noise,
+                                              gal_noise,
+                                              scope_noise,
+                                              nchan=len(nus),
+                                              numax=max(nus + np.diff(nus)[0]),
+                                              numin=min(nus),
+                                              enforce_numax=True,
+                                              verbose=False,
+                                              nsteps=optimize_freq.nsteps,
+                                              dnu=optimize_freq.dnu,
+                                              log=optimize_freq.log_grid,
+                                              levels=optimize_freq.levels,
+                                              colors=optimize_freq.colors,
+                                              lws=optimize_freq.lws,
+                                              ncpu=optimize_freq.ncpu)
+            # ensure full band is included in grid
+            B_full = fop_inst.numax - fop_inst.numin
+            C_full = fop_inst.numin + B_full / 2.
+            fop_inst.Cs = np.unique(np.sort(np.append(fop_inst.Cs, C_full)))
+            fop_inst.Bs = np.unique(np.sort(np.append(fop_inst.Bs, B_full)))
+            # get optimum ctr freq, BW
+            fop_inst.calc()
+            ctr_opt, bw_opt = fop_inst.get_optimum()
+            numin_opt = ctr_opt - bw_opt / 2.
+            numax_opt = ctr_opt + bw_opt / 2.
+            optimum = {scope.name + "_freqopt" : {"nu_min" : numin_opt,
+                                                  "nu_max" : numax_opt}}
+            # re-calculate sigmas in optimized band
+            nus_opt = np.linspace(numin_opt,
+                                  numax_opt,
+                                  len(nus) + 1)[:-1]
+            scope_noise_init_opt = fop.TelescopeNoise(1.,
+                                                      1.,
+                                                      T=t_int,
+                                                      rxspecfile=rxspecfile)
+            scope_noise_init_opt.gain = oops.get_gains(scope,
+                                        p.dec,
+                                        scope_noise_init_opt.get_gain(nus_opt))
             if isinstance(timefac, np.ndarray):
-                scope_noise_init.T = get_tobs(scope_noise_init.get_T(nus),
-                                         scope,
-                                         p.dec)
+                scope_noise_init_opt.T = get_tobs(
+                    scope_noise_init_opt.get_T(nus_opt),
+                    scope,
+                    p.dec)
             else:
-                scope_noise_init.T = scope_noise_init.get_T(nus)
-            # if 0. in scope_noise_init.T:
-            #     print('Zero in scope_noise_init.T : {}'.format(scope_noise_init.T))
-            #     print('Gain = {}'.format(scope_noise_init.gain))
-
-            # re-initialize telescope noise with dec-dependent gains, int time
-            scope_noise = fop.TelescopeNoise(rx_nu=nus,
-                                             gain=scope_noise_init.gain,
-                                             T_rx=scope_noise_init.get_T_rx(nus),
-                                             epsilon=scope_noise_init.get_epsilon(nus),
-                                             T=scope_noise_init.T)
-            pulsar_noise = fop.PulsarNoise('', 
-                                           alpha=-1 * p.spindex,
-                                           dtd=p.dtd,
-                                           dnud=p.dnud,
-                                           taud=p.taud,
-                                           C1=1.16,
-                                           I_0=p.s_1000,
-                                           DM=p.dm,
-                                           D=p.dist,
-                                           tauvar=0.5 * p.taud,
-                                           Weffs=p.weff,
-                                           W50s=p.w50,
-                                           Uscale=p.uscale,
-                                           sigma_Js=p.sigma_jitter(scope_noise.T),
-                                           glon=j2k_coords.galactic.b.degree,
-                                           glat=j2k_coords.galactic.l.degree)
-            gal_noise = fop.GalacticNoise()
-            if optimize_freq is None:
-                fop_inst = fop.FrequencyOptimizer(pulsar_noise,
+                scope_noise_init_opt.T = scope_noise_init_opt.get_T(nus_opt)
+            pulsar_noise.sigma_Js = p.sigma_jitter(scope_noise_init_opt.T)
+            scope_noise_opt = fop.TelescopeNoise(rx_nu=nus_opt,
+                                gain=scope_noise_init_opt.gain,
+                                T_rx=scope_noise_init_opt.get_T_rx(nus_opt),
+                                epsilon=scope_noise_init_opt.get_epsilon(nus_opt),
+                                T=scope_noise_init_opt.T)
+            fop_inst_opt = fop.FrequencyOptimizer(pulsar_noise,
                                                   gal_noise,
-                                                  scope_noise,
-                                                  nchan=len(nus),
-                                                  numax=get_ctrfreq(nus),
-                                                  numin=get_ctrfreq(nus),
-                                                  vverbose=False)
-                sigma_tup = fop_inst.calc_single(nus)
-                p.add_sigmas(scope.name, sigma_tup)
-            else: # optimize observing frequency within band
-                p.telescope_noise.update({scope.name : scope_noise})
-                fop_inst = fop.FrequencyOptimizer(pulsar_noise,
-                                                  gal_noise,
-                                                  scope_noise,
-                                                  nchan=len(nus),
-                                                  numax=max(nus + np.diff(nus)[0]),
-                                                  numin=min(nus),
-                                                  enforce_numax=True,
-                                                  verbose=False,
-                                                  nsteps=optimize_freq.nsteps,
-                                                  dnu=optimize_freq.dnu,
-                                                  log=optimize_freq.log_grid,
-                                                  levels=optimize_freq.levels,
-                                                  colors=optimize_freq.colors,
-                                                  lws=optimize_freq.lws,
-                                                  ncpu=optimize_freq.ncpu)
-                # ensure full band is included in grid
-                B_full = fop_inst.numax - fop_inst.numin
-                C_full = fop_inst.numin + B_full / 2.
-                fop_inst.Cs = np.unique(np.sort(np.append(fop_inst.Cs, C_full)))
-                fop_inst.Bs = np.unique(np.sort(np.append(fop_inst.Bs, B_full)))
-                # get optimum ctr freq, BW
-                fop_inst.calc()
-                ctr_opt, bw_opt = fop_inst.get_optimum()
-                numin_opt = ctr_opt - bw_opt / 2.
-                numax_opt = ctr_opt + bw_opt / 2.
-                p.optimum.update({scope.name + "_freqopt" : {"nu_min" : numin_opt,
-                                                             "nu_max" : numax_opt}})
-                # re-calculate sigmas in optimized band
-                nus_opt = np.linspace(numin_opt,
-                                      numax_opt,
-                                      len(nus) + 1)[:-1]
-                scope_noise_init_opt = fop.TelescopeNoise(1.,
-                                                          1.,
-                                                          T=t_int,
-                                                          rxspecfile=rxspecfile)
-                scope_noise_init_opt.gain = oops.get_gains(scope,
-                                            p.dec,
-                                            scope_noise_init_opt.get_gain(nus_opt))
-                if isinstance(timefac, np.ndarray):
-                    scope_noise_init_opt.T = get_tobs(
-                        scope_noise_init_opt.get_T(nus_opt),
-                        scope,
-                        p.dec)
-                else:
-                    scope_noise_init_opt.T = scope_noise_init_opt.get_T(nus_opt)
-                pulsar_noise.sigma_Js = p.sigma_jitter(scope_noise_init_opt.T)
-                scope_noise_opt = fop.TelescopeNoise(rx_nu=nus_opt,
-                                    gain=scope_noise_init_opt.gain,
-                                    T_rx=scope_noise_init_opt.get_T_rx(nus_opt),
-                                    epsilon=scope_noise_init_opt.get_epsilon(nus_opt),
-                                    T=scope_noise_init_opt.T)
-                p.telescope_noise.update({scope.name + "_freqopt" : scope_noise_opt})
-                fop_inst_opt = fop.FrequencyOptimizer(pulsar_noise,
-                                                      gal_noise,
-                                                      scope_noise_opt,
-                                                      nchan=len(nus_opt),
-                                                      numax=max(nus_opt),
-                                                      numin=min(nus_opt),
-                                                      verbose=False)
-                sigma_tup_opt = fop_inst_opt.calc_single(nus_opt)
-                p.add_sigmas(scope.name + "_freqopt", sigma_tup_opt)
+                                                  scope_noise_opt,
+                                                  nchan=len(nus_opt),
+                                                  numax=max(nus_opt),
+                                                  numin=min(nus_opt),
+                                                  verbose=False)
+            sigma_tup_opt = fop_inst_opt.calc_single(nus_opt)
 
-                if optimize_freq.plot:
-                    plot_fname = "{}_{}.png".format(p.name,
-                                                    scope.name)
-                    fop_inst.plot(path.join(optimize_freq.plotdir,
-                                            plot_fname),
-                                  doshow=False,
-                                  minimum="k*")
-    return
+            if optimize_freq.plot:
+                plot_fname = "{}_{}.png".format(p.name,
+                                                scope.name)
+                fop_inst.plot(path.join(optimize_freq.plotdir,
+                                        plot_fname),
+                              doshow=False,
+                              minimum="k*")
+
+            return (p.name, scope.name + "_freqopt",
+                    sigma_tup_opt, scope_noise_opt, optimum)
 
 def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
     if abs(psr_dec - scope.lat) >= 90. - horiz:
@@ -301,5 +344,5 @@ if __name__ == '__main__':
                 gainexp=chime_uwbr_gainexp,
                 timefac=chime_uwbr_timefac)
 
-    with open('NG15yr.pta', 'wb') as ptaf:
+    with open('parallel.pta', 'wb') as ptaf:
         pickle.dump(pta, ptaf)
