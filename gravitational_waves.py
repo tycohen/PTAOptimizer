@@ -5,11 +5,12 @@ import pickle
 
 SECS_PER_YEAR = 365.25 * 24 * 3600.0
 
-def gwb_snr(pta, instr, timespan_yr=None,
-            cadence=12, n_freqs=400, use_best_instr=False,
-            gwb_strainamp=2.4e-15, return_sencurve=False):
+def get_hasasia_psrs(pta, instr, timespan_yr=None,
+                     cadence=12, n_freqs=400, use_best_instr=False,
+                     gwb_strainamp=2.4e-15, gwb_spindex=-2/3.,
+                     return_sencurve=False):
     """
-Compute the S/N of a GWB in the PTA
+    Build list of hasasia.sensitivity.Pulsar from PTA object
 
 Parameters:
 __________
@@ -28,15 +29,12 @@ n_freqs: int
 gwb_strainamp: float
        dimensionless GWB strain amplitude, default is NG15 Bayesian 
        posterior GWB amplitude
-return_sencurve: bool
-       instead of returning just the S/N, return the 
-       hasasia.sensitivity.GWBSensitivityCurve
+gwb_spindex: float
+       spectral index of dimensionless GWB strain spectrum
 Returns:
 _______
-
-snr: float, S/N of the GWB
-OR
-scurve: hasasia.sensitivity.GWBSensitivityCurve
+psrdict: dict containing list of hasasia.sensitivity.Pulsar objects, 
+GW frequencies, GWB strain amplitude, and GWB spectral index
     """
     # get sky positions for all of the pulsars
     ras = np.array([p.ra for p in pta.psrlist])
@@ -70,7 +68,7 @@ scurve: hasasia.sensitivity.GWBSensitivityCurve
     freqs = np.linspace(1 / max_time_s,
                         0.5 * cadence / SECS_PER_YEAR,
                         n_freqs)
-    # build sensitivity curve and compute S/N
+    # build list of pulsars
     psrs = hsim.sim_pta(timespan=timespans,
                         cad=cadence,
                         sigma=sigma_tots * 1e-6,
@@ -81,19 +79,50 @@ scurve: hasasia.sensitivity.GWBSensitivityCurve
                         A_gwb=gwb_strainamp,
                         alpha_gwb=-2/3,
                         freqs=freqs)
+    psrdict= {"psrs": psrs,
+              "freqs": freqs,
+              "gwb_strainamp": gwb_strainamp,
+              "gwb_spindex": gwb_spindex}
+    return psrdict
+    
+
+def gwb_snr(psrdict,
+            return_sencurve=False):
+    """
+Compute the S/N of a GWB from list of 
+hasasia.sensitivity.Pulsar objects
+
+psrdict: dict
+       dictionary containing the following keys/values:
+    psrs: list of hasasia.sensitivity.Pulsar objects
+    freqs: list or array of GW frequencies to compute spectrum
+    gwb_strainamp: dimensionless GWB strain amplitude
+    gwb_spindex: spectral index of dimensionless GWB strain spectrum
+return_sencurve: bool
+       instead of returning just the S/N, return the 
+       hasasia.sensitivity.GWBSensitivityCurve
+Returns:
+_______
+
+snr: float, S/N of the GWB
+OR
+scurve: hasasia.sensitivity.GWBSensitivityCurve
+    """
     spectra = []
-    for p in psrs:
-        sp = hsen.Spectrum(p, freqs=freqs)
+    for p in psrdict["psrs"]:
+        sp = hsen.Spectrum(p, freqs=psrdict["freqs"])
         sp.NcalInv
         spectra.append(sp)
     scurve = hsen.GWBSensitivityCurve(spectra)
-    Sh = hsen.S_h(gwb_strainamp, -2/3., freqs)
+    Sh = hsen.S_h(psrdict["gwb_strainamp"],
+                  psrdict["gwb_spindex"],
+                  psrdict["freqs"])
     snr = scurve.SNR(Sh)
     if return_sencurve:
         return scurve
     else:
         return snr
-    
+
 def rednoise_psd2charstrain(amp_red, gamma_red):
     """
     Convert red noise amplitude in us yr^1/2 and spectral index of
