@@ -135,7 +135,7 @@ snr: float, S/N of the GWB
 OR
 scurve: hasasia.sensitivity.GWBSensitivityCurve
     """
-    scurve = hsen.GWBSensitivityCurve(psrdict["spectra"].values)
+    scurve = hsen.GWBSensitivityCurve(list(psrdict["spectra"].values()))
     Sh = hsen.S_h(psrdict["gwb_strainamp"],
                   psrdict["gwb_spindex"],
                   psrdict["freqs"])
