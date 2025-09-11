@@ -10,7 +10,8 @@ def get_hasasia_psrs(pta, instr, timespan_yr=None,
                      gwb_strainamp=2.4e-15, gwb_spindex=-2/3.,
                      return_sencurve=False):
     """
-    Build list of hasasia.sensitivity.Pulsar from PTA object
+Build a dict of hasasia.sensitivity.Pulsar and 
+hasasia.sensitivity.Spectrum objects from PTA object
 
 Parameters:
 __________
@@ -33,9 +34,11 @@ gwb_spindex: float
        spectral index of dimensionless GWB strain spectrum
 Returns:
 _______
-psrdict: dict containing list of hasasia.sensitivity.Pulsar objects, 
-GW frequencies, GWB strain amplitude, and GWB spectral index
+psrdict: dict containing list of hasasia.sensitivity.Pulsar objects,
+a dict of hasasia.sensitivity.Spectrum objects for each pulsar,
+GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
     """
+    names = [p.name for p in pta.psrlist]
     # get sky positions for all of the pulsars
     ras = np.array([p.ra for p in pta.psrlist])
     decs = np.array([p.dec for p in pta.psrlist])
@@ -69,7 +72,8 @@ GW frequencies, GWB strain amplitude, and GWB spectral index
                         0.5 * cadence / SECS_PER_YEAR,
                         n_freqs)
     # build list of pulsars
-    psrs = hsim.sim_pta(timespan=timespans,
+    psrs = hsim.sim_pta(psr_names=names,
+                        timespan=timespans,
                         cad=cadence,
                         sigma=sigma_tots * 1e-6,
                         phi=phi,
@@ -79,22 +83,45 @@ GW frequencies, GWB strain amplitude, and GWB spectral index
                         A_gwb=gwb_strainamp,
                         alpha_gwb=-2/3,
                         freqs=freqs)
+    spectra = {}
+    for p in psrs:
+        sp = hsen.Spectrum(p, freqs=freqs)
+        sp.NcalInv
+        spectra[p.name] = sp
     psrdict= {"psrs": psrs,
               "freqs": freqs,
+              "spectra": spectra,
+              "cadence": cadence,
+              "instruments": instr,
               "gwb_strainamp": gwb_strainamp,
               "gwb_spindex": gwb_spindex}
     return psrdict
     
+def update_noise_spectra_approx(psrdict, pta_new):
+    """
+Use the approximation NcalInv = Tf/Pn(f) to update
+in-place, each hasasia.sensitivity.Spectrum object in 'psrdict'
+with the noise properties of the respective pulsars in 
+'pta_new.psrlist'
+    """
+    for p, instr in zip(pta_new.psrlist, psrdict["instruments"]):
+        psd_new = build_pulsar_psd(psrdict["spectra"][p.name],
+                                   p, instr,
+                                   psrdict["cadence"],
+                                   psrdict["gwb_strainamp"],
+                                   psrdict["gwb_spindex"])
+        psrdict["spectra"][p.name].update_NcalInv_with_approx(psd_new)
+    return
 
 def gwb_snr(psrdict,
             return_sencurve=False):
     """
 Compute the S/N of a GWB from list of 
-hasasia.sensitivity.Pulsar objects
+hasasia.sensitivity.Spectrum objects
 
 psrdict: dict
        dictionary containing the following keys/values:
-    psrs: list of hasasia.sensitivity.Pulsar objects
+    spectra: dict of hasasia.sensitivity.Spectrum objects
     freqs: list or array of GW frequencies to compute spectrum
     gwb_strainamp: dimensionless GWB strain amplitude
     gwb_spindex: spectral index of dimensionless GWB strain spectrum
@@ -108,12 +135,7 @@ snr: float, S/N of the GWB
 OR
 scurve: hasasia.sensitivity.GWBSensitivityCurve
     """
-    spectra = []
-    for p in psrdict["psrs"]:
-        sp = hsen.Spectrum(p, freqs=psrdict["freqs"])
-        sp.NcalInv
-        spectra.append(sp)
-    scurve = hsen.GWBSensitivityCurve(spectra)
+    scurve = hsen.GWBSensitivityCurve(psrdict["spectra"].values)
     Sh = hsen.S_h(psrdict["gwb_strainamp"],
                   psrdict["gwb_spindex"],
                   psrdict["freqs"])
@@ -123,6 +145,37 @@ scurve: hasasia.sensitivity.GWBSensitivityCurve
     else:
         return snr
 
+def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_idx):
+    """
+    Compute new pulsar PSD from existing spectrum
+
+    Parameters:
+    __________
+
+    sp: hasasia.sensitivity.Spectrum
+    pulsar: pulsar.Pulsar object
+    instr: (str) instrument which measured TOA uncertainty
+    cad: (int, float) observing cadence in number/year
+    gwb_amp: dimensionless GWB strain amplitude
+    gwb_idx: spectral index of dimensionless GWB strain spectrum
+    
+    Returns:
+    _______
+
+    new_psd: (numpy.ndarray) new PSD with same length as 'sp'
+    """
+    try:
+        rnamp = pulsar.rn_strainamp
+        rnidx = pulsar.rn_strainindex
+    except AttributeError:
+        rnamp = 0
+        rnidx = 0
+    new_psd = sp.add_white_noise_power(pulsar.sigmas[instr]["sigma_tot"] * 1e-6,
+                                       SECS_PER_YEAR / cad, vals=True) \
+                + sp.add_red_noise_power(rnamp, rnidx, vals=True) \
+                + sp.add_red_noise_power(gwb_amp, gwb_idx, vals=True)
+    return new_psd
+    
 def rednoise_psd2charstrain(amp_red, gamma_red):
     """
     Convert red noise amplitude in us yr^1/2 and spectral index of
