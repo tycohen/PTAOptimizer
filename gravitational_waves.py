@@ -88,7 +88,7 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
         sp = hsen.Spectrum(p, freqs=freqs)
         sp.NcalInv
         spectra[p.name] = sp
-    psrdict= {"psrs": psrs,
+    psrdict= {"psrs": {p.name: p for p in psrs},
               "freqs": freqs,
               "spectra": spectra,
               "cadence": cadence,
@@ -105,12 +105,15 @@ with the noise properties of the respective pulsars in
 'pta_new.psrlist'
     """
     for p, instr in zip(pta_new.psrlist, psrdict["instruments"]):
-        psd_new = build_pulsar_psd(psrdict["spectra"][p.name],
-                                   p, instr,
+        old_sp = psrdict["spectra"][p.name]
+        new_psd = build_pulsar_psd(old_sp, p, instr,
                                    psrdict["cadence"],
                                    psrdict["gwb_strainamp"],
                                    psrdict["gwb_spindex"])
-        psrdict["spectra"][p.name].update_NcalInv_with_approx(psd_new)
+        new_sp = hsen.Spectrum(psrdict["psrs"][p.name],
+                               freqs=psrdict["freqs"])
+        new_sp.update_NcalInv_with_approx(new_psd)
+        psrdict["spectra"][p.name] = new_sp
     return
 
 def gwb_snr(psrdict,
@@ -147,7 +150,7 @@ scurve: hasasia.sensitivity.GWBSensitivityCurve
 
 def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_idx):
     """
-    Compute new pulsar PSD from existing spectrum
+    Compute new pulsar PSD from existing Spectrum object
 
     Parameters:
     __________
