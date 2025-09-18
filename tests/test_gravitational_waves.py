@@ -50,7 +50,7 @@ class test_update_noise_spectra_approx(unittest.TestCase):
         gw.update_noise_spectra_approx(self.psrdict, self.pta_new)
         NcalInv_new = self.psrdict["spectra"]["testpulsar1"]._NcalInv
         spec_id_new = id(self.psrdict["spectra"]["testpulsar1"])
-#        self.assertEqual(spec_id_old, spec_id_new)
+        self.assertEqual(spec_id_old, spec_id_new)
         with self.assertRaises(AssertionError):
             np.testing.assert_array_equal(NcalInv_old, NcalInv_new)
 
@@ -87,7 +87,6 @@ class test_update_noise_spectra_approx(unittest.TestCase):
                                         timespan_yr=15., cadence=12, n_freqs=400,
                                         use_best_instr=False,
                                         gwb_strainamp=2.4e-15, gwb_spindex=-2/3.)
-
         # update both to the same "new" sigmas (1 us) 
         gw.update_noise_spectra_approx(psrdict_A, self.pta_new)
         gw.update_noise_spectra_approx(psrdict_B, self.pta_new)

@@ -105,15 +105,12 @@ with the noise properties of the respective pulsars in
 'pta_new.psrlist'
     """
     for p, instr in zip(pta_new.psrlist, psrdict["instruments"]):
-        old_sp = psrdict["spectra"][p.name]
-        new_psd = build_pulsar_psd(old_sp, p, instr,
+        psd_new = build_pulsar_psd(psrdict["spectra"][p.name],
+                                   p, instr,
                                    psrdict["cadence"],
                                    psrdict["gwb_strainamp"],
                                    psrdict["gwb_spindex"])
-        new_sp = hsen.Spectrum(psrdict["psrs"][p.name],
-                               freqs=psrdict["freqs"])
-        new_sp.update_NcalInv_with_approx(new_psd)
-        psrdict["spectra"][p.name] = new_sp
+        psrdict["spectra"][p.name].update_NcalInv_with_approx(psd_new)
     return
 
 def gwb_snr(psrdict,
