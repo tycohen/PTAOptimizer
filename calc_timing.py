@@ -11,13 +11,14 @@ from optimize import OptimizeFrequency
 def calc_timing(pta,
                 nus,
                 rxspecfile=None,
-                t_int=1800.,
+                t_int=None,
                 dec_lim=None,
                 lat=None,
                 gainmodel=None,
                 gainexp=None,
                 timefac=0.,
-                optimize_freq=None):
+                optimize_freq=None,
+                verbose=False):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
     if not isinstance(optimize_freq, (OptimizeFrequency, type(None))):
@@ -29,6 +30,37 @@ def calc_timing(pta,
                           lat=lat,
                           gainmodel=gainmodel,
                           gainexp=gainexp)
+        # per-pulsar integration time
+        if t_int is not None:
+            t_int_psr = float(t_int)
+        else:
+            # fall back to p.t_int[scope.name]
+            if not hasattr(p, "t_int"):
+                raise ValueError(
+                    "'t_int' is None and Pulsar {} has no attribute 't_int'. "
+                    "Either set p.t_int[{!r}] or provide a scalar t_int."
+                    .format(p.name, scope.name)
+                )
+            if not isinstance(p.t_int, dict):
+                raise TypeError(
+                    "Pulsar {}.t_int must be a dict mapping instrument->seconds,"
+                    " got {}"
+                    .format(p.name, type(p.t_int))
+                )
+            try:
+                t_int_psr = float(p.t_int[scope.name])
+            except KeyError as e:
+                raise KeyError(
+                    "Pulsar {} is missing key {!r} in 't_int' dict."
+                    .format(p.name, e.args[0])
+                )
+
+        if not np.isfinite(t_int_psr) or t_int_psr <= 0:
+            raise ValueError(
+                "Invalid t_int for {} with {}: {} (must be finite and > 0)"
+                .format(p.name, scope.name, t_int_psr)
+            )
+
         scope.timefac = timefac
         if not hasattr(p, "ra"):
             ra_str = p.name[1:3] + 'h' + p.name[3:5] + 'm' # get RA from Jname
@@ -38,7 +70,7 @@ def calc_timing(pta,
         # initial scope noise to get the rx specs
         scope_noise_init = fop.TelescopeNoise(1.,
                                               1.,
-                                              T=t_int,
+                                              T=t_int_psr,
                                               rxspecfile=rxspecfile)
         scope_noise_init.gain = oops.get_gains(scope,
                                                p.dec,
@@ -126,7 +158,7 @@ def calc_timing(pta,
                                       len(nus) + 1)[:-1]
                 scope_noise_init_opt = fop.TelescopeNoise(1.,
                                                           1.,
-                                                          T=t_int,
+                                                          T=t_int_psr,
                                                           rxspecfile=rxspecfile)
                 scope_noise_init_opt.gain = oops.get_gains(scope,
                                             p.dec,

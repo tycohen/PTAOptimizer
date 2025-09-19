@@ -49,6 +49,8 @@ class Pulsar(object):
                 for each instrument
     optimum : dict
               dictionary of optimized parameters for each instrument
+    t_int : dict
+            dictionary of integration times for each instrument
     """
     def __init__(self,
                  name=None,
@@ -71,6 +73,7 @@ class Pulsar(object):
                  sigmas=None,
                  telescope_noise=None,
                  optimum=None,
+                 t_int=None,
                  *args,
                  **kwargs):
         """
@@ -100,6 +103,7 @@ class Pulsar(object):
         else:
             self.telescope_noise = dict(telescope_noise)
         self.optimum = {} if optimum is None else dict(optimum)
+        self.t_int = {} if t_int is None else dict(t_int)
 
     def sigma_jitter(self, t_int):
         """Return intrinsic jitter noise (in us)
