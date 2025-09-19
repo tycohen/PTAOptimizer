@@ -30,8 +30,11 @@ def calc_timing(pta,
                           gainmodel=gainmodel,
                           gainexp=gainexp)
         scope.timefac = timefac
-        ra_str = p.name[1:3] + 'h' + p.name[3:5] + 'm' # get RA from Jname
-        j2k_coords = SkyCoord(ra=ra_str, dec=p.dec*u.deg, frame='icrs')
+        if not hasattr(p, "ra"):
+            ra_str = p.name[1:3] + 'h' + p.name[3:5] + 'm' # get RA from Jname
+            j2k_coords = SkyCoord(ra=ra_str, dec=p.dec*u.deg, frame='icrs')
+        else:
+            j2k_coords = SkyCoord(ra=p.ra*u.deg, dec=p.dec*u.deg, frame='icrs')
         # initial scope noise to get the rx specs
         scope_noise_init = fop.TelescopeNoise(1.,
                                               1.,
