@@ -26,18 +26,34 @@ def calc_timing(pta,
                 timefac=0.,
                 optimize_freq=None,
                 verbose=False,
-                max_workers=None):
+                max_workers=1):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
     if not isinstance(optimize_freq, (OptimizeFrequency, type(None))):
         raise TypeError("If set, 'optimize_freq' must be "
                         "None or optimize.OptimizeFrequency")
 
-    if optimize_freq is not None and optimize_freq.ncpu > 1:
-        raise ValueError("ncpu for FrequencyOptimizer must be 1"
-                         " when parallelizing over pulsars")
-    if max_workers is None:
-        max_workers = max(1, (os.cpu_count() or 1) - 2)
+    if optimize_freq is not None and optimize_freq.ncpu > 1 and max_workers > 1:
+        raise ValueError("optimize_freq.ncpu and max_workers cannot both be "
+                         "> 1. Do not parallelize over pulsars and frequency "
+                         "optimization simulataneously.")
+    safe_ncpu = max(1, (os.cpu_count() or 1) - 2)
+    if max_workers > safe_ncpu:
+        max_workers = safe_ncpu
+
+    if max_workers == 1: # dont spawn child processes, run in serial
+        for p in pta.psrlist:
+            psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
+                p, nus, rxspecfile, t_int, dec_lim, lat,
+                gainmodel, gainexp, timefac, optimize_freq
+            )
+            p.add_sigmas(instr_name, sigma_tup)
+            try:
+                p.optimum.update(optimum_dict)
+            except AttributeError:
+                pass
+            p.telescope_noise.update({instr_name : telnoise})
+        return
 
     futures = []
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
@@ -46,7 +62,7 @@ def calc_timing(pta,
                 time_single_pulsar, p, nus, rxspecfile, t_int, dec_lim, lat,
                 gainmodel, gainexp, timefac, optimize_freq
             ))
-        
+
         for fut in as_completed(futures):
             psrname, instr_name, sigma_tup, telnoise, optimum_dict = fut.result()
             p = pta.get_single_pulsar(psrname)
