@@ -1,5 +1,9 @@
 from os import path
 import numpy as np
+import cma
+from PTAOptimizer import uptime
+from calc_timing import calc_timing
+import gravitational_waves as gw
 
 class OptimizeFrequency(object):
     """
@@ -75,4 +79,245 @@ class OptimizeFrequency(object):
             self.lws = lws
         else:
             raise TypeError("'lws' must be None or a list")
+
+class OptimizeTime(object):
+    """
+    Class to optimize observing time parameter(s)
+
+    Attributes:
+    ----------
+
+    """
+    def __init__(self,
+                 pta,
+                 nus,
+                 rxspecfile,
+                 dec_lim=None,
+                 lat=None,
+                 t_int0=None,
+                 t_int_min=60.,
+                 t_int_maxtot=gw.SECS_PER_YEAR / 12.,
+                 epoch_days=365.25 / 12,
+                 timefac=0.,
+                 gainmodel=None,
+                 gainexp=None,
+                 optimize_freq=None,
+                 timespan_yr=None,
+                 cadence=None,
+                 n_gw_freq=400,
+                 gwb_strainamp=2.4e-15,
+                 gwb_spindex=-2/3.,
+                 use_best_instr=False,
+                 max_evals=2000,
+                 max_workers=1):
+        """
+        ___init___ function for the OptimizeFrequency class
+        """
+        self.pta = pta
+        self.nus = nus
+        self.rxspecfile = rxspecfile
+        self.dec_lim = dec_lim
+        self.lat = lat
+        self.scope_horizon = self.dec_lim[1] - self.lat + 90.
+        self.epoch_days = epoch_days
+        self.t_int_min = t_int_min
+        self.t_int_max = np.array([uptime.uptime(p.dec,
+                                                 self.lat,
+                                                 horiz=self.scope_horizon,
+                                                 epoch_days=self.epoch_days)
+                                   for p in self.pta.psrlist])
+        if t_int0 is not None and not len(t_int0) == len(self.pta.psrlist):
+            raise ValueError("'t_int0' must have same shape as pta.psrlist: "
+                             "({},) not {}".format(len(self.pta.psrlist),
+                                                   len(t_int0)))
+        self.t_int0 = t_int0
+        self.t_int_maxtot = t_int_maxtot
+        self.timefac = timefac
+        self.gainmodel = gainmodel
+        self.gainexp = gainexp
+        self.optimize_freq = optimize_freq
+        self.instr_name = path.splitext(path.basename(rxspecfile))[0]
+        if optimize_freq:
+            self.instr_name_opt = self.instr_name + "_freqopt"
+        else:
+            self.instr_name_opt = self.instr_name
+        self.max_workers = max_workers
+        self.max_evals = max_evals
+        self.timespan_yr = timespan_yr
+        self.cadence = cadence
+        self.n_gw_freq = n_gw_freq
+        if use_best_instr:
+            raise NotImplementedError("Best instrument selection not currently "
+                                      "supported.")
+        else:
+            self.use_best_instr = use_best_instr
+        self.gwb_strainamp = gwb_strainamp
+        self.gwb_spindex = gwb_spindex
+
+    def _reset_pta_inplace(self):
+        """
+        Clear timing fields for next iteration
+        """
+        for p in self.pta.psrlist:
+            try:
+                p.sigmas.clear()
+            except AttributeError:
+                p.sigmas = {}
+            try:
+                p.telescope_noise.clear()
+            except AttributeError:
+                p.telescope_noise = {}
+            try:
+                p.optimum.clear()
+            except AttributeError:
+                p.optimum = {}
+
+    def _set_t_int_vector(self, t_vec):
+        """
+        Set per-pulsar integration times for instrument
+        """
+        for ti, p in zip(t_vec, self.pta.psrlist):
+            if not hasattr(p, "t_int") or not isinstance(p.t_int, dict):
+                p.t_int = {}
+            p.t_int[self.instr_name] = float(ti)
+
+    def _project_to_feasible(self, x):
+        """
+        Enforce t_int_min ≤ x_i ≤ t_int_max[i] and sum(x) ≤ t_int_maxtot.
+        Clip to box, then scale down proportionally if over budget.
+        """
+        y = np.clip(np.asarray(x, dtype=float),
+                    self.t_int_min, self.t_int_max)
+        s = float(np.sum(y))
+        if s <= float(self.t_int_maxtot) + 1e-12:
+            return y
+        if s > 0.0:
+            y *= (float(self.t_int_maxtot) / s)
+        return np.minimum(y, self.t_int_max)
+
+    def _feasible(self, x, tol=1e-10):
+        x = np.asarray(x, dtype=float)
+        return (x >= -tol).all() and (x <= self.t_int_max + tol).all() \
+            and (x.sum() <= self.t_int_maxtot + tol) \
+            and (x >= self.t_int_min - tol).all()
+
+    
+    def evaluate_snr(self, psrdict, t_vec):
+        """
+        Compute the GWB S/N for updated vector of integration times
+        """
+        self._reset_pta_inplace()
+        self._set_t_int_vector(t_vec)
+
+        calc_timing(self.pta,
+                    self.nus,
+                    rxspecfile=self.rxspecfile,
+                    t_int=None,
+                    dec_lim=self.dec_lim,
+                    lat=self.lat,
+                    gainmodel=self.gainmodel,
+                    gainexp=self.gainexp,
+                    timefac=self.timefac,
+                    optimize_freq=self.optimize_freq,
+                    verbose=False,
+                    max_workers=self.max_workers)
+        gw.update_noise_spectra_approx(psrdict, self.pta)
+        return float(gw.gwb_snr(psrdict))
+
+    def maximize_snr_with_cma(self,
+                              sigma0=0.3,
+                              seed=42,
+                              verbose=True):
+        """
+        Wrapper for CMA to maximize GW SNR over per-pulsar, per-epoch integration
+        times using CMA-ES.
+        Constraint: t_int_min ≤ t_i ≤ t_int_max[i],  sum_i t_i ≤ t_int_maxtot.
+        """
+        N = len(self.pta.psrlist)
+        # Initial guess
+        if self.t_int0 is None:
+            # if no initial guess, start with even distribution of time
+            x0 = self._project_to_feasible(np.full(N,
+                                            (self.t_int_maxtot / N) - 1e-10))
+        else:
+            x0 = self._project_to_feasible(self.t_int0)
+
+
+        self._reset_pta_inplace()
+        self._set_t_int_vector(x0)
+
+        calc_timing(self.pta,
+                    self.nus,
+                    rxspecfile=self.rxspecfile,
+                    t_int=None,
+                    dec_lim=self.dec_lim,
+                    lat=self.lat,
+                    gainmodel=self.gainmodel,
+                    gainexp=self.gainexp,
+                    timefac=self.timefac,
+                    optimize_freq=self.optimize_freq,
+                    verbose=False,
+                    max_workers=self.max_workers)
+
+        psrdict = gw.get_hasasia_psrs(self.pta,
+                                      instr=self.instr_name_opt,
+                                      timespan_yr=self.timespan_yr,
+                                      cadence=self.cadence,
+                                      n_freqs=self.n_gw_freq,
+                                      use_best_instr=self.use_best_instr,
+                                      gwb_strainamp=self.gwb_strainamp,
+                                      gwb_spindex=self.gwb_spindex)
+        
+        # CMA setup (minimize -SNR)
+        opts = {
+            "seed": int(seed),
+            "bounds": [np.full(N, float(self.t_int_min), dtype=float),
+                       self.t_int_max.astype(float)],
+            "verb_disp": int(verbose),
+            "maxfevals": int(self.max_evals),
+            # Optional knobs you can uncomment/tune:
+            # "popsize": 4 + int(3 * np.log(N)),
+            # "CMA_diagonal": True,      # sometimes helps at start for high-D
+        }
+        es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
+
+        best_snr = -np.inf
+        best_x = x0.copy()
+
+        while not es.stop():
+            X = es.ask()
+            Z = []
+            f_vals = []
+            for x in X:
+                z = self._project_to_feasible(x)
+                Z.append(z)
+                try:
+                    snr = self.evaluate_snr(psrdict, z)
+                    f = -snr
+                except Exception:
+                    # steer CMA away from failures
+                    snr = -1e9
+                    f = 1e9
+                f_vals.append(float(f))
+                if snr > best_snr:
+                    best_snr = float(snr)
+                    best_x = z.copy()
+            es.tell(Z, f_vals)
+            if verbose:
+                es.disp()
+        # store the result
+        self.res = es.result  # (xbest, fbest, evals_best, evals, iterations, ...)
+
+        # check that optimal within bounds
+        x_star = self.res.xbest
+        if not self._feasible(x_star):
+            raise RuntimeError("CMA returned infeasible xbest; "
+                               "check ask/tell wiring.")
+        snr_star = float(-self.res.fbest)
+        # Ensure we return the best seen feasible point
+        if best_snr > snr_star:
+            x_star, snr_star = best_x, best_snr
+        for x, p in zip(x_star, self.pta.psrlist):
+            p.optimum[self.instr_name_opt]["t_int"] = x
+        return x_star, snr_star
 
