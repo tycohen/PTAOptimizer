@@ -12,8 +12,6 @@ import astropy.units as u
 import frequencyoptimizer as fop
 from PTAOptimizer.telescope import Telescope
 import PTAOptimizer.observatory_ops as oops
-from optimize import OptimizeFrequency
-
 
 def calc_timing(pta,
                 nus,
@@ -29,9 +27,11 @@ def calc_timing(pta,
                 max_workers=1):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
-    if not isinstance(optimize_freq, (OptimizeFrequency, type(None))):
-        raise TypeError("If set, 'optimize_freq' must be "
-                        "None or optimize.OptimizeFrequency")
+    if optimize_freq is not None:
+        if isinstance(optimize_freq, bool):
+            raise TypeError("If set, 'optimize_freq' must be "
+                            "an optimize.OptimizeFrequency object, "
+                            "not a boolean.")
 
     if optimize_freq is not None and optimize_freq.ncpu > 1 and max_workers > 1:
         raise ValueError("optimize_freq.ncpu and max_workers cannot both be "
