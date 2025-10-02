@@ -227,11 +227,26 @@ class OptimizeTime(object):
     def maximize_snr_with_cma(self,
                               sigma0=0.3,
                               seed=42,
-                              verbose=True):
+                              popsize=None,
+                              start_diag=0,
+                              cma_stds=None,
+                              updatecovwait=None,
+                              verbose=False):
         """
         Wrapper for CMA to maximize GW SNR over per-pulsar, per-epoch integration
         times using CMA-ES.
-        Constraint: t_int_min ≤ t_i ≤ t_int_max[i],  sum_i t_i ≤ t_int_maxtot.
+
+        Parameters:
+        __________
+        sigma0: (float) initial standard deviation of free parameters
+        seed: (int) seed for optimizer
+        popsize: (float) the number of new proposed solutions per iteration,
+when None, popsize = 4 + 3 * np.log(N)
+        start_diag: (int) number of iterations with diagonal covariance matrix
+        cma_stds: (list or numpy.ndarray) multipliers for sigma0 in each coordinate
+        updatecovwait: number of iterations without distribution update
+maxfevals        -> inf  #v maximum number of function evaluations
+
         """
         N = len(self.pta.psrlist)
         # Initial guess
@@ -258,7 +273,6 @@ class OptimizeTime(object):
                     optimize_freq=self.optimize_freq,
                     verbose=False,
                     max_workers=self.max_workers)
-
         psrdict = gw.get_hasasia_psrs(self.pta,
                                       instr=self.instr_name_opt,
                                       timespan_yr=self.timespan_yr,
@@ -267,7 +281,7 @@ class OptimizeTime(object):
                                       use_best_instr=self.use_best_instr,
                                       gwb_strainamp=self.gwb_strainamp,
                                       gwb_spindex=self.gwb_spindex)
-        
+
         # CMA setup (minimize -SNR)
         opts = {
             "seed": int(seed),
@@ -275,10 +289,17 @@ class OptimizeTime(object):
                        self.t_int_max.astype(float)],
             "verb_disp": int(verbose),
             "maxfevals": int(self.max_evals),
-            # Optional knobs you can uncomment/tune:
-            # "popsize": 4 + int(3 * np.log(N)),
-            # "CMA_diagonal": True,      # sometimes helps at start for high-D
+            # Optional tuning parameters
+            "popsize": popsize,
+            "CMA_diagonal": start_diag, 
+            "CMA_stds": cma_stds,
+            "updatecovwait": updatecovwait
         }
+        if popsize is None:
+            opts["popsize"] = 4 + 3 * np.log(N)
+        else:
+            opts["popsize"] = popsize
+            
         es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
 
         best_snr = -np.inf
@@ -318,6 +339,7 @@ class OptimizeTime(object):
         if best_snr > snr_star:
             x_star, snr_star = best_x, best_snr
         for x, p in zip(x_star, self.pta.psrlist):
+            p.optimum.update({self.instr_name_opt: {}})
             p.optimum[self.instr_name_opt]["t_int"] = x
         return x_star, snr_star
 
