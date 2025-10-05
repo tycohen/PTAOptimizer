@@ -1,12 +1,10 @@
 import os
-# avoid BLAS oversubscription in each worker
-for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-            "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-    os.environ.setdefault(var, "1")
 import pickle
 import numpy as np
 from os import path
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from threadpoolctl import threadpool_limits
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import frequencyoptimizer as fop
@@ -41,37 +39,40 @@ def calc_timing(pta,
     if max_workers > safe_ncpu:
         max_workers = safe_ncpu
 
-    if max_workers == 1: # dont spawn child processes, run in serial
-        for p in pta.psrlist:
-            psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
-                p, nus, rxspecfile, t_int, dec_lim, lat,
-                gainmodel, gainexp, timefac, optimize_freq
-            )
-            p.add_sigmas(instr_name, sigma_tup)
-            try:
-                p.optimum.update(optimum_dict)
-            except AttributeError:
-                pass
-            p.telescope_noise.update({instr_name : telnoise})
-        return
+    with threadpool_limits(1): # Cap BLAS/MKL threads
+        if max_workers == 1: # dont spawn child processes, run in serial
+            for p in pta.psrlist:
+                psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
+                    p, nus, rxspecfile, t_int, dec_lim, lat,
+                    gainmodel, gainexp, timefac, optimize_freq
+                )
+                p.add_sigmas(instr_name, sigma_tup)
+                try:
+                    p.optimum.update(optimum_dict)
+                except AttributeError:
+                    pass
+                p.telescope_noise.update({instr_name : telnoise})
+            return
 
-    futures = []
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        for p in pta.psrlist:
-            futures.append(ex.submit(
-                time_single_pulsar, p, nus, rxspecfile, t_int, dec_lim, lat,
-                gainmodel, gainexp, timefac, optimize_freq
-            ))
+        ctx = mp.get_context("fork")
+        futures = []
+        with ProcessPoolExecutor(max_workers=max_workers,
+                                 mp_context=ctx) as ex:
+            for p in pta.psrlist:
+                futures.append(ex.submit(
+                    time_single_pulsar, p, nus, rxspecfile, t_int, dec_lim,
+                    lat, gainmodel, gainexp, timefac, optimize_freq
+                ))
 
-        for fut in as_completed(futures):
-            psrname, instr_name, sigma_tup, telnoise, optimum_dict = fut.result()
-            p = pta.get_single_pulsar(psrname)
-            p.add_sigmas(instr_name, sigma_tup)
-            try:
-                p.optimum.update(optimum_dict)
-            except AttributeError:
-                pass
-            p.telescope_noise.update({instr_name : telnoise})
+            for fut in as_completed(futures):
+                psrname, instr_name, sigma_tup, telnoise, optimum_dict = fut.result()
+                p = pta.get_single_pulsar(psrname)
+                p.add_sigmas(instr_name, sigma_tup)
+                try:
+                    p.optimum.update(optimum_dict)
+                except AttributeError:
+                    pass
+                p.telescope_noise.update({instr_name : telnoise})
                 
 def time_single_pulsar(p, nus, rxspecfile, t_int, dec_lim, lat,
                        gainmodel=None, gainexp=None, timefac=0.,
