@@ -1,7 +1,7 @@
 from os import path
 import numpy as np
 import cma
-from PTAOptimizer import uptime
+import PTAOptimizer.observatory_ops as oops
 from calc_timing import calc_timing
 import gravitational_waves as gw
 
@@ -121,7 +121,7 @@ class OptimizeTime(object):
         self.scope_horizon = self.dec_lim[1] - self.lat + 90.
         self.epoch_days = epoch_days
         self.t_int_min = t_int_min
-        self.t_int_max = np.array([uptime.uptime(p.dec,
+        self.t_int_max = np.array([oops.uptime(p.dec,
                                                  self.lat,
                                                  horiz=self.scope_horizon,
                                                  epoch_days=self.epoch_days)
