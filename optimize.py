@@ -154,6 +154,37 @@ class OptimizeTime(object):
         self.gwb_strainamp = gwb_strainamp
         self.gwb_spindex = gwb_spindex
 
+    def _make_tint_grid(self, n_levels, log=False):
+        """
+        Make an 'n_levels' x N pulsars grid of integration times
+        """
+        tgrid = []
+        for tmax in self.t_int_max:
+            if log:
+                tgrid.append(np.logspace(np.log10(self.t_int_min),
+                                         np.log10(tmax),
+                                         num=n_levels,
+                                         dtype=float))
+            else:
+                tgrid.append(np.linspace(self.t_int_min, tmax,
+                                         num=n_levels, dtype=float))
+        return np.array(tgrid)
+            
+    def set_tint_from_grid(self, n_levels, log=False):
+        """
+        Set Pulsar t_int dicts with keys "self.instr_name + _tinti"
+        where i is from 0 to 'n_levels' based on a grid of integration times
+        Resets Pulsar sigmas, telescope_noise, optimum and t_int dicts
+        """
+        for p in self.pta.psrlist:
+            if hasattr(p, "t_int"):
+                p.t_int.clear()
+        self._reset_pta_inplace()
+        tgrid = self._make_tint_grid(n_levels, log=log)
+        for i, t_vec in enumerate(tgrid.T):
+            instr_name = self.instr_name + "_tint{}".format(i)
+            self._set_t_int_vector(t_vec, instr_name)
+                
     def _reset_pta_inplace(self):
         """
         Clear timing fields for next iteration
@@ -172,14 +203,17 @@ class OptimizeTime(object):
             except AttributeError:
                 p.optimum = {}
 
-    def _set_t_int_vector(self, t_vec):
+    def _set_t_int_vector(self, t_vec, instr_name=None):
         """
         Set per-pulsar integration times for instrument
+        Uses instr_name attr if None supplied
         """
+        if instr_name is None:
+            instr_name = self.instr_name
         for ti, p in zip(t_vec, self.pta.psrlist):
             if not hasattr(p, "t_int") or not isinstance(p.t_int, dict):
                 p.t_int = {}
-            p.t_int[self.instr_name] = float(ti)
+            p.t_int[instr_name] = float(ti)
 
     def _project_to_feasible(self, x):
         """
