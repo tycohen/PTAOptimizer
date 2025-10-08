@@ -300,37 +300,24 @@ def chime_only(write=False):
         with open('NG15yr_CHIMEonly.pta', 'wb') as ptaf:
             pickle.dump(pta, ptaf)
     return pta
-    
+
 if __name__ == '__main__':
     """
     'Main' function; calculate sigmas for multiple telescope configs
     and writes out to .pta file. File is overwritten each time.
     """
-    with open('NG15yr.pta', 'rb') as ptaf:
+    with open('NG20yr-DSA.pta', 'rb') as ptaf:
         pta = pickle.load(ptaf, encoding="latin1")
-    print('Timing AO L-S')
-    LbandSlo_nus = np.arange(1.44 - .618 / 2, 1.868, 0.011)
-    Shi_nus = np.arange(2.227 - .354 / 2, 2.227 + .354 / 2, 0.01)[:-1]
-    aoLS_nus = np.sort(np.concatenate([LbandSlo_nus, Shi_nus]))
-    calc_timing(pta,
-                aoLS_nus,
-                rxspecfile="./rxspecs/AO_Lwide_Swide_logain.txt",
-                dec_lim=(39., 0.),
-                t_int=1800.,
-                lat=18.44,
-                gainmodel=None,
-                gainexp=None)
 
-    print('Timing AO 430-L')
-    nus_ao430 = np.arange(.432 - .02 / 2, .432 + .02 / 2, 0.00125)[:-1]
-    nus_aoL = np.arange(1.44 - .58 / 2, 1.44 + .58 / 2, 0.00125)[:-1]
-    ao430L_nus = np.concatenate([nus_ao430, nus_aoL])
+    dsa2k_nus = np.linspace(1.35 - 1.3 / 2, 1.35 + 1.3 / 2, 100 + 1)[:-1]
+    t_int = 3600.
+    print('Timing DSA1650 with Full Array for {} min/psr'.format(t_int / 60.))
     calc_timing(pta,
-                ao430L_nus,
-                rxspecfile="./rxspecs/AO_430_Lwide_logain.txt",
-                t_int=1800.,
-                dec_lim=(39., 0.),
-                lat=18.44,
+                dsa2k_nus,
+                rxspecfile="rxspecs/DSA1650.txt",
+                t_int=t_int,
+                dec_lim=(90., -30.),
+                lat=37.23,
                 gainmodel=None,
                 gainexp=None)
     
