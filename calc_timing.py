@@ -14,6 +14,7 @@ import PTAOptimizer.observatory_ops as oops
 def calc_timing(pta,
                 nus,
                 rxspecfile=None,
+                scope_name=None,
                 t_int=None,
                 dec_lim=None,
                 lat=None,
@@ -25,6 +26,8 @@ def calc_timing(pta,
                 max_workers=1):
     if rxspecfile is None:
         raise ValueError('rxspecfile must be defined')
+    if scope_name is None:
+        scope_name = path.splitext(path.basename(rxspecfile))[0]
     if optimize_freq is not None:
         if isinstance(optimize_freq, bool):
             raise TypeError("If set, 'optimize_freq' must be "
@@ -43,7 +46,7 @@ def calc_timing(pta,
         if max_workers == 1: # dont spawn child processes, run in serial
             for p in pta.psrlist:
                 psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
-                    p, nus, rxspecfile, t_int, dec_lim, lat,
+                    p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                     gainmodel, gainexp, timefac, optimize_freq
                 )
                 p.add_sigmas(instr_name, sigma_tup)
@@ -60,7 +63,8 @@ def calc_timing(pta,
                                  mp_context=ctx) as ex:
             for p in pta.psrlist:
                 futures.append(ex.submit(
-                    time_single_pulsar, p, nus, rxspecfile, t_int, dec_lim,
+                    time_single_pulsar, p, nus, rxspecfile, scope_name,
+                    t_int, dec_lim,
                     lat, gainmodel, gainexp, timefac, optimize_freq
                 ))
 
@@ -74,7 +78,7 @@ def calc_timing(pta,
                     pass
                 p.telescope_noise.update({instr_name : telnoise})
                 
-def time_single_pulsar(p, nus, rxspecfile, t_int, dec_lim, lat,
+def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                        gainmodel=None, gainexp=None, timefac=0.,
                        optimize_freq=None):
     """
@@ -88,7 +92,7 @@ def time_single_pulsar(p, nus, rxspecfile, t_int, dec_lim, lat,
     scope noise: frequencyoptimizer.TelescopeNoise
     optimum: dict of optimized observing parameters
     """
-    scope = Telescope(name=path.splitext(path.basename(rxspecfile))[0],
+    scope = Telescope(name=scope_name,
                       dec_lim=dec_lim,
                       lat=lat,
                       gainmodel=gainmodel,
