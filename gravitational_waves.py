@@ -83,7 +83,7 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
                         A_rn=rn_strainamps,
                         alpha=rn_strainidxs,
                         A_gwb=gwb_strainamp,
-                        alpha_gwb=-2/3,
+                        alpha_gwb=gwb_spindex,
                         freqs=freqs)
     spectra = {}
     for p in psrs:
