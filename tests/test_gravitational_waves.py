@@ -97,3 +97,52 @@ class test_update_noise_spectra_approx(unittest.TestCase):
         # If the Spectrum update fully controls the SNR noise,
         # these should match to tight numerical tolerance.
         np.testing.assert_allclose(snr_A, snr_B, rtol=1e-10, atol=0.0)
+
+class test_get_hasasia_psrs(unittest.TestCase):
+
+    def setUp(self):
+        self.pulsar1 = Pulsar(name="testpulsar1",
+                              dec=90.,
+                              ra=180.,
+                              sigmas={"test_config": {"sigma_tot": 10.}})
+        self.pulsar2 = Pulsar(name="testpulsar2",
+                              dec=0.,
+                              ra=0.,
+                              sigmas={"test_config": {"sigma_tot": 1.}})
+        self.pta = PTA(psrlist=[self.pulsar1, self.pulsar2])
+        self.gwb_spindex = -2 / 3.
+        self.psrdict = gw.get_hasasia_psrs(self.pta, "test_config",
+                                           timespan_yr=15.,
+                                           cadence=12, n_freqs=400,
+                                           use_best_instr=False,
+                                           gwb_strainamp=2.4e-15,
+                                           gwb_spindex=self.gwb_spindex,
+                                           return_sencurve=False)
+
+    def test_psrdict_contains_correct_positive_gwb_gamma_conversion(self):
+        gwb_gamma_expected = 13 / 3.
+        np.testing.assert_allclose(self.psrdict['gwb_gamma'],
+                                   gwb_gamma_expected,
+                                   rtol=1e-10)
+
+        
+class test_rednoise_charstrain2psd(unittest.TestCase):
+
+    def test_red_noise_strain_alpha_to_psd_gamma_conversion(self):
+        red_alpha = -2 / 3.
+        red_gamma_answer = 13 / 3.
+        __, red_gamma = gw.rednoise_charstrain2psd(1., red_alpha)
+        np.testing.assert_allclose(red_gamma,
+                                   red_gamma_answer,
+                                   rtol=1e-10)
+ 
+class test_rednoise_psd2charstrain(unittest.TestCase):
+
+    def test_red_noise_psd_gamma_to_strain_alpha_conversion(self):
+        red_gamma = 13 / 3.
+        red_alpha_answer = -2 / 3.
+        __, red_alpha = gw.rednoise_psd2charstrain(1., red_gamma)
+        np.testing.assert_allclose(red_alpha,
+                                   red_alpha_answer,
+                                   rtol=1e-10)
+       

@@ -44,7 +44,9 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
     decs = np.array([p.dec for p in pta.psrlist])
     phi = ras * np.pi / 180.
     theta = np.pi / 2 - decs * np.pi / 180.
-
+    gwb_psdamp, gwb_gamma = rednoise_charstrain2psd(gwb_strainamp,
+                                                    gwb_spindex)
+    
     if timespan_yr is not None:
         timespans = np.full(len(pta.psrlist), timespan_yr)
     else:
@@ -94,7 +96,8 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
               "cadence": cadence,
               "instruments": instr,
               "gwb_strainamp": gwb_strainamp,
-              "gwb_spindex": gwb_spindex}
+              "gwb_spindex": gwb_spindex,
+              "gwb_gamma": gwb_gamma}
     return psrdict
     
 def update_noise_spectra_approx(psrdict, pta_new):
@@ -109,7 +112,7 @@ with the noise properties of the respective pulsars in
                                    p, instr,
                                    psrdict["cadence"],
                                    psrdict["gwb_strainamp"],
-                                   psrdict["gwb_spindex"])
+                                   psrdict["gwb_gamma"])
         psrdict["spectra"][p.name].update_NcalInv_with_approx(psd_new)
     return
 
@@ -145,7 +148,7 @@ scurve: hasasia.sensitivity.GWBSensitivityCurve
     else:
         return snr
 
-def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_idx):
+def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_gamma):
     """
     Compute new pulsar PSD from existing Spectrum object
 
@@ -157,7 +160,7 @@ def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_idx):
     instr: (str) instrument which measured TOA uncertainty
     cad: (int, float) observing cadence in number/year
     gwb_amp: dimensionless GWB strain amplitude
-    gwb_idx: spectral index of dimensionless GWB strain spectrum
+    gwb_gamma: (positive) PSD spectral index the GWB
     
     Returns:
     _______
@@ -170,10 +173,11 @@ def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_idx):
     except AttributeError:
         rnamp = 0
         rnidx = 0
+    # hasasia convention is positive gamma
     new_psd = sp.add_white_noise_power(pulsar.sigmas[instr]["sigma_tot"] * 1e-6,
                                        SECS_PER_YEAR / cad, vals=True) \
                 + sp.add_red_noise_power(rnamp, rnidx, vals=True) \
-                + sp.add_red_noise_power(gwb_amp, gwb_idx, vals=True)
+                + sp.add_red_noise_power(gwb_amp, gwb_gamma, vals=True)
     return new_psd
     
 def rednoise_psd2charstrain(amp_red, gamma_red):
@@ -183,6 +187,17 @@ def rednoise_psd2charstrain(amp_red, gamma_red):
     and spectral index
     (See Arzoumanian et al., 2021: NG12 Search for GWB, Eq. 2) 
     """
-    alpha = (gamma_red + 3.) / 2.
+    alpha = (3. - gamma_red) / 2.
     amp_strain = amp_red * np.sqrt(12) * np.pi * 3.171e-14
     return amp_strain, alpha
+
+def rednoise_charstrain2psd(amp_strain, alpha):
+    """
+    Convert dimensionless strain GWB amplitude and spectral index 
+    to red noise amplitude in us yr^1/2 and spectral index of
+    timing residual PSD
+    (See Arzoumanian et al., 2021: NG12 Search for GWB, Eq. 2) 
+    """
+    gamma_red = 3 - 2. * alpha
+    amp_red = 3.154e13 * amp_strain / (np.sqrt(12) * np.pi)
+    return amp_red, gamma_red
