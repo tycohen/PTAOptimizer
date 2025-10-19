@@ -1,4 +1,5 @@
 import numpy as np
+import gravitational_waves as gw
 
 class Pulsar(object):
     """
@@ -112,6 +113,19 @@ class Pulsar(object):
         self.t_int = {} if t_int is None else dict(t_int)
         self.redamp = redamp
         self.redgamma = redgamma
+
+    @property
+    def redalpha(self):
+        """
+        Negative strain spectral index
+        """
+        if self.redamp is None or self.redgamma is None:
+            return None
+        if self.redamp > 0. and self.redgamma > 0.:
+            _, alpha = gw.rednoise_psd2charstrain(self.redamp, self.redgamma)
+        else:
+            alpha = 0.
+        return alpha
         
     def sigma_jitter(self, t_int):
         """Return intrinsic jitter noise (in us)
