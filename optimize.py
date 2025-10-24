@@ -1,4 +1,5 @@
 from os import path
+from scipy.interpolate import PchipInterpolator
 import numpy as np
 import cma
 import PTAOptimizer.observatory_ops as oops
@@ -138,9 +139,10 @@ class OptimizeTime(object):
         self.optimize_freq = optimize_freq
         self.instr_name = path.splitext(path.basename(rxspecfile))[0]
         if optimize_freq:
-            self.instr_name_opt = self.instr_name + "_freqopt"
+            self.optstr = "_freqopt"
         else:
-            self.instr_name_opt = self.instr_name
+            self.optstr = ""
+        self.instr_name_opt = self.instr_name + self.optstr
         self.max_workers = max_workers
         self.max_evals = max_evals
         self.timespan_yr = timespan_yr
@@ -153,7 +155,8 @@ class OptimizeTime(object):
             self.use_best_instr = use_best_instr
         self.gwb_strainamp = gwb_strainamp
         self.gwb_spindex = gwb_spindex
-
+        self.tint_grid_names = None
+        
     def _make_tint_grid(self, n_levels, log=False):
         """
         Make an 'n_levels' x N pulsars grid of integration times
@@ -176,6 +179,7 @@ class OptimizeTime(object):
         where i is from 0 to 'n_levels' based on a grid of integration times
         Resets Pulsar sigmas, telescope_noise, optimum and t_int dicts
         """
+        self.tint_grid_names = []
         for p in self.pta.psrlist:
             if hasattr(p, "t_int"):
                 p.t_int.clear()
@@ -183,8 +187,29 @@ class OptimizeTime(object):
         tgrid = self._make_tint_grid(n_levels, log=log)
         for i, t_vec in enumerate(tgrid.T):
             instr_name = self.instr_name + "_tint{}".format(i)
+            self.tint_grid_names.append(instr_name)
             self._set_t_int_vector(t_vec, instr_name)
-                
+
+    def fill_tint_lookup_table(self):
+        """
+        Compute 'sigmas' dict for each integration time set using
+        'set_tint_from_grid'
+        """
+        for instr in self.tint_grid_names:
+            calc_timing(self.pta,
+                        self.nus,
+                        scope_name=instr,
+                        rxspecfile=self.rxspecfile,
+                        t_int=None,
+                        dec_lim=self.dec_lim,
+                        lat=self.lat,
+                        gainmodel=self.gainmodel,
+                        gainexp=self.gainexp,
+                        timefac=self.timefac,
+                        optimize_freq=self.optimize_freq,
+                        verbose=False,
+                        max_workers=self.max_workers)
+        
     def _reset_pta_inplace(self):
         """
         Clear timing fields for next iteration
@@ -215,6 +240,28 @@ class OptimizeTime(object):
                 p.t_int = {}
             p.t_int[instr_name] = float(ti)
 
+    def interp_sigma(self, pulsar, tint_find):
+        """
+        interpolate sigma_tot(tint) for a single pulsar at tint=tint_find
+        """
+        tint = [pulsar.t_int[k] for k in self.tint_grid_names]
+        sigma = [pulsar.sigmas[k + self.optstr]["sigma_tot"]
+                 for k in self.tint_grid_names]
+        f = PchipInterpolator(tint, sigma)
+        return f(tint_find)
+        
+    def _set_sigma_interp_lut(self, t_vec):
+        """
+        Set sigmas and t_int in instrument key named 
+        self.instr_name + '_sigma_interp'
+        for interpolated values from lookup table for each pulsar
+        """
+        for ti, p in zip(t_vec, self.pta.psrlist):
+            interp_key = self.instr_name + "_sigma_interp"
+            p.t_int[interp_key] = ti
+            p.sigmas[interp_key] = {}
+            p.sigmas[interp_key]["sigma_tot"] = self.interp_sigma(p, ti)
+
     def _project_to_feasible(self, x):
         """
         Enforce t_int_min ≤ x_i ≤ t_int_max[i] and sum(x) ≤ t_int_maxtot.
@@ -235,7 +282,6 @@ class OptimizeTime(object):
             and (x.sum() <= self.t_int_maxtot + tol) \
             and (x >= self.t_int_min - tol).all()
 
-    
     def evaluate_snr(self, psrdict, t_vec):
         """
         Compute the GWB S/N for updated vector of integration times
