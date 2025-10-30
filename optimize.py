@@ -303,10 +303,21 @@ class OptimizeTime(object):
                     max_workers=self.max_workers)
         gw.update_noise_spectra_approx(psrdict, self.pta)
         return float(gw.gwb_snr(psrdict))
+    
+    def evaluate_snr_from_lut(self, psrdict, t_vec):
+        """
+        Compute the GWB S/N for updated vector of integration times
+        using sigma lookup table instead of calc_timing
+        """
+        # can't reset pta or it will clear LUT
+        self._set_sigma_interp_lut(t_vec)
+        gw.update_noise_spectra_approx(psrdict, self.pta)
+        return float(gw.gwb_snr(psrdict))
 
     def maximize_snr_with_cma(self,
                               sigma0=0.3,
                               seed=42,
+                              use_lut=False,
                               popsize=None,
                               start_diag=0,
                               cma_stds=None,
@@ -320,6 +331,7 @@ class OptimizeTime(object):
         __________
         sigma0: (float) initial standard deviation of free parameters
         seed: (int) seed for optimizer
+        use_lut: (bool) use lookup table/interpolation for calculating sigmas
         popsize: (float) the number of new proposed solutions per iteration,
 when None, popsize = 4 + 3 * np.log(N)
         start_diag: (int) number of iterations with diagonal covariance matrix
@@ -328,6 +340,18 @@ when None, popsize = 4 + 3 * np.log(N)
 maxfevals        -> inf  #v maximum number of function evaluations
 
         """
+        if use_lut:
+            if self.tint_grid_names is None:
+                raise ValueError("use_lut is {} but no tint_grid_names set\n"
+                                 "call set_tint_from_grid first".format(use_lut))
+            has_lut = all((k + self.optstr) in p.sigmas
+                          and "sigma_tot" in p.sigmas[k + self.optstr]
+                          for p in self.pta.psrlist
+                          for k in self.tint_grid_names)
+            if not has_lut:
+                raise ValueError("use_lut is {} but lookup table is empty\n"
+                                 "call fill_tint_lookup_table first".format(use_lut))
+        
         N = len(self.pta.psrlist)
         # Initial guess
         if self.t_int0 is None:
@@ -337,24 +361,29 @@ maxfevals        -> inf  #v maximum number of function evaluations
         else:
             x0 = self._project_to_feasible(self.t_int0)
 
-
-        self._reset_pta_inplace()
-        self._set_t_int_vector(x0)
-
-        calc_timing(self.pta,
-                    self.nus,
-                    rxspecfile=self.rxspecfile,
-                    t_int=None,
-                    dec_lim=self.dec_lim,
-                    lat=self.lat,
-                    gainmodel=self.gainmodel,
-                    gainexp=self.gainexp,
-                    timefac=self.timefac,
-                    optimize_freq=self.optimize_freq,
-                    verbose=False,
-                    max_workers=self.max_workers)
+        # use interpolation if lookup table, otherwise call calc_timing
+        if use_lut:
+            # can't reset pta or it will clear LUT            
+            self._set_sigma_interp_lut(x0)
+            instr_name_lut_depdt = self.instr_name + "_sigma_interp"
+        else:
+            self._reset_pta_inplace()
+            self._set_t_int_vector(x0)
+            instr_name_lut_depdt = self.instr_name_opt
+            calc_timing(self.pta,
+                        self.nus,
+                        rxspecfile=self.rxspecfile,
+                        t_int=None,
+                        dec_lim=self.dec_lim,
+                        lat=self.lat,
+                        gainmodel=self.gainmodel,
+                        gainexp=self.gainexp,
+                        timefac=self.timefac,
+                        optimize_freq=self.optimize_freq,
+                        verbose=False,
+                        max_workers=self.max_workers)
         psrdict = gw.get_hasasia_psrs(self.pta,
-                                      instr=self.instr_name_opt,
+                                      instr=instr_name_lut_depdt,
                                       timespan_yr=self.timespan_yr,
                                       cadence=self.cadence,
                                       n_freqs=self.n_gw_freq,
@@ -393,10 +422,14 @@ maxfevals        -> inf  #v maximum number of function evaluations
                 z = self._project_to_feasible(x)
                 Z.append(z)
                 try:
-                    snr = self.evaluate_snr(psrdict, z)
+                    if use_lut:
+                        snr = self.evaluate_snr_from_lut(psrdict, z)
+                    else:
+                        snr = self.evaluate_snr(psrdict, z)
                     f = -snr
-                except Exception:
+                except Exception as e:
                     # steer CMA away from failures
+                    print(e)
                     snr = -1e9
                     f = 1e9
                 f_vals.append(float(f))
