@@ -5,6 +5,7 @@ import cma
 import PTAOptimizer.observatory_ops as oops
 from calc_timing import calc_timing
 import gravitational_waves as gw
+import copy
 
 class OptimizeFrequency(object):
     """
@@ -156,6 +157,7 @@ class OptimizeTime(object):
         self.gwb_strainamp = gwb_strainamp
         self.gwb_spindex = gwb_spindex
         self.tint_grid_names = None
+        self.snr_grid_from_lut = None
         
     def _make_tint_grid(self, n_levels, log=False):
         """
@@ -313,7 +315,66 @@ class OptimizeTime(object):
         self._set_sigma_interp_lut(t_vec)
         gw.update_noise_spectra_approx(psrdict, self.pta)
         return float(gw.gwb_snr(psrdict))
+        
+    def _lut_check(self):
+        """
+        Check if lookup table exists and is filled
+        """
+        if self.tint_grid_names is None:
+            raise ValueError("use_lut is True but no tint_grid_names set\n"
+                             "call set_tint_from_grid first")
+        has_lut = all((k + self.optstr) in p.sigmas
+                      and "sigma_tot" in p.sigmas[k + self.optstr]
+                      for p in self.pta.psrlist
+                      for k in self.tint_grid_names)
+        if not has_lut:
+            raise ValueError("use_lut is True but lookup table is empty\n"
+                             "call fill_tint_lookup_table first")
 
+    def snr_grid_search_on_lut(self, verbose=False):
+        """
+        Perform a brute-force grid search for S/N from lookup-table sigmas
+        Fills self.snr_grid_from_lut
+        Computationally infeasible for PTAs of more than a few pulsars
+        Doesn't handle non-timed pulsars
+        """
+        self._lut_check()
+        if any([p.sigmas[k + self.optstr]["sigma_tot"] < 0.
+                for k in self.tint_grid_names for p in self.pta.psrlist]):
+            raise NotImplementedError("PTA contains an untimed pulsar, "
+                                      "filtering of untimed pulsars not supported")
+        n_psrs = len(self.pta.psrlist)
+        instr_axes = [self.tint_grid_names] * n_psrs
+        sigma_instr_list = [[k + self.optstr for k in self.tint_grid_names]]
+        sigma_instr_axes = sigma_instr_list * n_psrs
+        shape = tuple(len(ax) for ax in instr_axes)
+        self.snr_grid_from_lut = np.empty(shape, dtype=float)
+
+        # initiate psrdict at _tint0
+        psrdict = gw.get_hasasia_psrs(self.pta,
+                                      instr=sigma_instr_axes[0][0],
+                                      timespan_yr=self.timespan_yr,
+                                      cadence=self.cadence,
+                                      n_freqs=self.n_gw_freq,
+                                      use_best_instr=self.use_best_instr,
+                                      gwb_strainamp=self.gwb_strainamp,
+                                      gwb_spindex=self.gwb_spindex)
+        
+        # loop over _tinti instrument tuples
+        for idx in np.ndindex(shape):
+            tint_keys = [instr_axes[k][idx[k]] for k in range(len(instr_axes))]
+            sigma_keys = [sigma_instr_axes[k][idx[k]]
+                             for k in range(len(instr_axes))]
+            t_vec = [p.t_int[i] for p, i in zip(self.pta.psrlist,
+                                                tint_keys)]
+            if not self._feasible(t_vec):
+                self.snr_grid_from_lut[idx] = np.nan
+                continue
+            psrdict["instruments"] = sigma_keys
+            gw.update_noise_spectra_approx(psrdict, self.pta)
+            self.snr_grid_from_lut[idx] = float(gw.gwb_snr(psrdict))
+        return
+    
     def maximize_snr_with_cma(self,
                               sigma0=0.3,
                               seed=42,
@@ -341,17 +402,7 @@ maxfevals        -> inf  #v maximum number of function evaluations
 
         """
         if use_lut:
-            if self.tint_grid_names is None:
-                raise ValueError("use_lut is {} but no tint_grid_names set\n"
-                                 "call set_tint_from_grid first".format(use_lut))
-            has_lut = all((k + self.optstr) in p.sigmas
-                          and "sigma_tot" in p.sigmas[k + self.optstr]
-                          for p in self.pta.psrlist
-                          for k in self.tint_grid_names)
-            if not has_lut:
-                raise ValueError("use_lut is {} but lookup table is empty\n"
-                                 "call fill_tint_lookup_table first".format(use_lut))
-        
+           self._lut_check()
         N = len(self.pta.psrlist)
         # Initial guess
         if self.t_int0 is None:
