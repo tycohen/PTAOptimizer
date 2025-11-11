@@ -356,7 +356,7 @@ class OptimizeTime(object):
                                       timespan_yr=self.timespan_yr,
                                       cadence=self.cadence,
                                       n_freqs=self.n_gw_freq,
-                                      use_best_instr=self.use_best_instr,
+                                      use_best_instr=False,
                                       gwb_strainamp=self.gwb_strainamp,
                                       gwb_spindex=self.gwb_spindex)
         
@@ -367,7 +367,7 @@ class OptimizeTime(object):
                              for k in range(len(instr_axes))]
             t_vec = [p.t_int[i] for p, i in zip(self.pta.psrlist,
                                                 tint_keys)]
-            if not self._feasible(t_vec):
+            if not self._feasible(t_vec, tol=1e-8):
                 self.snr_grid_from_lut[idx] = np.nan
                 continue
             psrdict["instruments"] = sigma_keys
