@@ -176,8 +176,8 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                        W50s=p.w50,
                                        Uscale=p.uscale,
                                        sigma_Js=p.sigma_jitter(scope_noise.T),
-                                       glon=j2k_coords.galactic.b.degree,
-                                       glat=j2k_coords.galactic.l.degree)
+                                       glon=j2k_coords.galactic.l.degree,
+                                       glat=j2k_coords.galactic.b.degree)
         gal_noise = fop.GalacticNoise()
         if optimize_freq is None:
             fop_inst = fop.FrequencyOptimizer(pulsar_noise,
