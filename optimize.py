@@ -1,4 +1,5 @@
 from os import path
+from warnings import warn
 from scipy.interpolate import PchipInterpolator
 import numpy as np
 import cma
@@ -263,7 +264,7 @@ class OptimizeTime(object):
             p.t_int[interp_key] = ti
             p.sigmas[interp_key] = {}
             p.sigmas[interp_key]["sigma_tot"] = self.interp_sigma(p, ti)
-
+            
     def _project_to_feasible(self, x):
         """
         Enforce t_int_min ≤ x_i ≤ t_int_max[i] and sum(x) ≤ t_int_maxtot.
@@ -376,7 +377,7 @@ class OptimizeTime(object):
         return
     
     def maximize_snr_with_cma(self,
-                              sigma0=0.3,
+                              sigma0=1.,
                               seed=42,
                               use_lut=False,
                               popsize=None,
@@ -390,34 +391,66 @@ class OptimizeTime(object):
 
         Parameters:
         __________
-        sigma0: (float) initial standard deviation of free parameters
+        sigma0: (float) initial standard deviation of free parameters (in seconds)
         seed: (int) seed for optimizer
         use_lut: (bool) use lookup table/interpolation for calculating sigmas
-        popsize: (float) the number of new proposed solutions per iteration,
-when None, popsize = 4 + 3 * np.log(N)
+        popsize: (float) number of new proposed solutions per iteration,
+                 when None, popsize = 4 + 3 * np.log(N)
         start_diag: (int) number of iterations with diagonal covariance matrix
-        cma_stds: (list or numpy.ndarray) multipliers for sigma0 in each coordinate
-        updatecovwait: number of iterations without distribution update
-maxfevals        -> inf  #v maximum number of function evaluations
+        cma_stds: (list or numpy.ndarray) multipliers for sigma0 in each
+                  coordinate (same length as number of pulsars)
+        updatecovwait: (int or None) number of iterations without distribution
+                       update before covariance is adapted again
 
+        Returns
+        _______
+        x_star : numpy.ndarray
+            Best integration-time vector found (seconds per pulsar)
+        snr_star : float
+            Corresponding GWB S/N at x_star (recomputed without penalty)
         """
         if use_lut:
-           self._lut_check()
-        N = len(self.pta.psrlist)
-        # Initial guess
-        if self.t_int0 is None:
-            # if no initial guess, start with even distribution of time
-            x0 = self._project_to_feasible(np.full(N,
-                                            (self.t_int_maxtot / N) - 1e-10))
-        else:
-            x0 = self._project_to_feasible(self.t_int0)
+            self._lut_check()
 
+        N = len(self.pta.psrlist)
+
+        # Basic feasibility checks for the time budget
+        min_total = N * float(self.t_int_min)
+        max_total = float(np.sum(self.t_int_max))
+        if self.t_int_maxtot < min_total:
+            raise ValueError(
+                "Total time budget t_int_maxtot={} is smaller than "
+                "N * t_int_min={} (no feasible solution)."
+                .format(self.t_int_maxtot, min_total)
+            )
+        if self.t_int_maxtot > max_total:
+            warn("Total time budget t_int_maxtot={} exceeds sum(t_int_max)={}. "
+                 "Constraint sum(t_i) = t_int_maxtot cannot be satisfied exactly."
+                 .format(self.t_int_maxtot, max_total))
+
+        # Initial guess x0 (in seconds)
+        if self.t_int0 is not None:
+            x0 = np.array(self.t_int0, dtype=float)
+            if x0.shape[0] != N:
+                raise ValueError("'t_int0' has wrong length: {}, expected {}"
+                                 .format(x0.shape[0], N))
+        else:
+            # Start from roughly equal allocation of the total budget
+            x0 = np.full(N, self.t_int_maxtot / N, dtype=float)
+
+        # Clip x0 to per-pulsar box constraints
+        lower_bounds = np.full(N, float(self.t_int_min), dtype=float)
+        upper_bounds = self.t_int_max.astype(float)
+        x0 = np.clip(x0, lower_bounds, upper_bounds)
+
+        # Initialize PTA state and psrdict for hasasia
         # use interpolation if lookup table, otherwise call calc_timing
         if use_lut:
-            # can't reset pta or it will clear LUT            
+            # can't reset pta or it will clear LUT
             self._set_sigma_interp_lut(x0)
             instr_name_lut_depdt = self.instr_name + "_sigma_interp"
         else:
+            # Full calculation: reset PTA and compute sigmas for x0
             self._reset_pta_inplace()
             self._set_t_int_vector(x0)
             instr_name_lut_depdt = self.instr_name_opt
@@ -433,6 +466,7 @@ maxfevals        -> inf  #v maximum number of function evaluations
                         optimize_freq=self.optimize_freq,
                         verbose=False,
                         max_workers=self.max_workers)
+
         psrdict = gw.get_hasasia_psrs(self.pta,
                                       instr=instr_name_lut_depdt,
                                       timespan_yr=self.timespan_yr,
@@ -442,68 +476,95 @@ maxfevals        -> inf  #v maximum number of function evaluations
                                       gwb_strainamp=self.gwb_strainamp,
                                       gwb_spindex=self.gwb_spindex)
 
-        # CMA setup (minimize -SNR)
+        # CMA-ES setup
         opts = {
             "seed": int(seed),
-            "bounds": [np.full(N, float(self.t_int_min), dtype=float),
-                       self.t_int_max.astype(float)],
-            "verb_disp": int(verbose),
+            "verb_disp": int(bool(verbose)),
             "maxfevals": int(self.max_evals),
-            # Optional tuning parameters
-            "popsize": popsize,
-            "CMA_diagonal": start_diag, 
-            "CMA_stds": cma_stds,
-            "updatecovwait": updatecovwait
+            "bounds": [lower_bounds, upper_bounds],
         }
-        if popsize is None:
-            opts["popsize"] = 4 + 3 * np.log(N)
-        else:
+
+        # Optional tuning parameters
+        if popsize is not None:
             opts["popsize"] = popsize
-            
-        es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
+        else:
+            # Default heuristic: 4 + 3 * log(N)
+            opts["popsize"] = int(4 + 3 * np.log(N))
 
-        best_snr = -np.inf
-        best_x = x0.copy()
+        if start_diag:
+            opts["CMA_diagonal"] = int(start_diag)
+        if cma_stds is not None:
+            opts["CMA_stds"] = np.asarray(cma_stds, dtype=float)
+        if updatecovwait is not None:
+            opts["updatecovwait"] = int(updatecovwait)
 
+        # Penalty weight for total-time constraint
+        # penalty = penalty_weight * ((sum(t) - t_int_maxtot)/t_int_maxtot)^2
+        penalty_weight = 1e4
+
+        def objective(t_vec):
+            """
+            Objective for CMA-ES: minimize -SNR + penalty
+            where penalty enforces sum(t_i) ≈ t_int_maxtot.
+            """
+            t_vec = np.asarray(t_vec, dtype=float)
+            if t_vec.shape[0] != N:
+                return 1e9
+
+            if not np.all(np.isfinite(t_vec)):
+                return 1e9
+
+            # Total time budget penalty
+            total_time = float(np.sum(t_vec))
+            rel_err = (total_time - self.t_int_maxtot) / self.t_int_maxtot
+            penalty = penalty_weight * (rel_err ** 2)
+
+            try:
+                if use_lut:
+                    snr = self.evaluate_snr_from_lut(psrdict, t_vec)
+                else:
+                    snr = self.evaluate_snr(psrdict, t_vec)
+            except Exception:
+                # Any failure => very bad candidate
+                return 1e9
+
+            if not np.isfinite(snr):
+                return 1e9
+
+            # CMA-ES minimizes the objective
+            return -float(snr) + penalty
+
+        # Initialize CMA-ES
+        es = cma.CMAEvolutionStrategy(x0, float(sigma0), opts)
+
+        # Optimization loop
         while not es.stop():
-            X = es.ask()
-            Z = []
-            f_vals = []
-            for x in X:
-                z = self._project_to_feasible(x)
-                Z.append(z)
-                try:
-                    if use_lut:
-                        snr = self.evaluate_snr_from_lut(psrdict, z)
-                    else:
-                        snr = self.evaluate_snr(psrdict, z)
-                    f = -snr
-                except Exception as e:
-                    # steer CMA away from failures
-                    print(e)
-                    snr = -1e9
-                    f = 1e9
-                f_vals.append(float(f))
-                if snr > best_snr:
-                    best_snr = float(snr)
-                    best_x = z.copy()
-            es.tell(Z, f_vals)
+            X = es.ask()                    # list of candidate t_vecs
+            fX = [objective(x) for x in X]  # their objective values
+            es.tell(X, fX)                  # update CMA distribution
             if verbose:
                 es.disp()
-        # store the result
-        self.res = es.result  # (xbest, fbest, evals_best, evals, iterations, ...)
 
-        # check that optimal within bounds
-        x_star = self.res.xbest
-        if not self._feasible(x_star):
-            raise RuntimeError("CMA returned infeasible xbest; "
-                               "check ask/tell wiring.")
-        snr_star = float(-self.res.fbest)
-        # Ensure we return the best seen feasible point
-        if best_snr > snr_star:
-            x_star, snr_star = best_x, best_snr
+        # Best candidate found by CMA (in terms of the penalized objective)
+        x_star = np.array(es.result.xbest, dtype=float)
+        # Clip to safety (should already satisfy bounds due to CMA)
+        x_star = np.clip(x_star, lower_bounds, upper_bounds)
+
+        # Recompute SNR at x_star without penalty to get the true merit
+        if use_lut:
+            snr_star = self.evaluate_snr_from_lut(psrdict, x_star)
+        else:
+            snr_star = self.evaluate_snr(psrdict, x_star)
+
+        # Check how well the total-time constraint is satisfied
+        total_time_star = float(np.sum(x_star))
+        rel_err_star = (total_time_star - self.t_int_maxtot) / self.t_int_maxtot
+        if abs(rel_err_star) > 1e-2:
+            warn("CMA solution deviates from time budget by {:.2%} "
+                 "(sum(t) = {}, budget = {})."
+                 .format(rel_err_star, total_time_star, self.t_int_maxtot))
+        # save optimal times in optimum dict
         for x, p in zip(x_star, self.pta.psrlist):
             p.optimum.update({self.instr_name_opt: {}})
             p.optimum[self.instr_name_opt]["t_int"] = x
-        return x_star, snr_star
-
+        return x_star, float(snr_star)
