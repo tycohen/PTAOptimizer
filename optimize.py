@@ -375,10 +375,28 @@ class OptimizeTime(object):
             gw.update_noise_spectra_approx(psrdict, self.pta)
             self.snr_grid_from_lut[idx] = float(gw.gwb_snr(psrdict))
         return
+
+    def _grid_search_best_indices(self):
+        if self.snr_grid_from_lut is None:
+            raise ValueError("snr_grid_from_lut is None\n"
+                             "Run snr_grid_search_on_lut first")
+        flat = np.nan_to_num(self.snr_grid_from_lut,
+                             nan=-np.inf)
+        return np.unravel_index(np.argmax(flat), flat.shape)
+
+    def optimum_tint_grid(self):
+        """
+        Get optimum integration time vector from lookup table and grid of S/N
+        """
+        best_idx = self._grid_search_best_indices()
+        best_tint = np.array([p.t_int[self.tint_grid_names[i]]
+                              for p, i in zip(self.pta.psrlist, best_idx)])
+        return best_tint
     
     def maximize_snr_with_cma(self,
                               sigma0=1.,
                               seed=42,
+                              penalty_weight=1e4,
                               use_lut=False,
                               popsize=None,
                               start_diag=0,
@@ -498,10 +516,6 @@ class OptimizeTime(object):
         if updatecovwait is not None:
             opts["updatecovwait"] = int(updatecovwait)
 
-        # Penalty weight for total-time constraint
-        # penalty = penalty_weight * ((sum(t) - t_int_maxtot)/t_int_maxtot)^2
-        penalty_weight = 1e4
-
         def objective(t_vec):
             """
             Objective for CMA-ES: minimize -SNR + penalty
@@ -515,6 +529,7 @@ class OptimizeTime(object):
                 return 1e9
 
             # Total time budget penalty
+            # penalty = penalty_weight * ((sum(t) - t_int_maxtot)/t_int_maxtot)^2
             total_time = float(np.sum(t_vec))
             rel_err = (total_time - self.t_int_maxtot) / self.t_int_maxtot
             penalty = penalty_weight * (rel_err ** 2)
