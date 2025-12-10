@@ -392,7 +392,7 @@ class OptimizeTime(object):
         best_tint = np.array([p.t_int[self.tint_grid_names[i]]
                               for p, i in zip(self.pta.psrlist, best_idx)])
         return best_tint
-    
+
     def maximize_snr_with_cma(self,
                               sigma0=1.,
                               seed=42,
@@ -402,6 +402,7 @@ class OptimizeTime(object):
                               start_diag=0,
                               cma_stds=None,
                               updatecovwait=None,
+                              log10_t=False,
                               verbose=False):
         """
         Wrapper for CMA to maximize GW SNR over per-pulsar, per-epoch integration
@@ -419,6 +420,9 @@ class OptimizeTime(object):
                   coordinate (same length as number of pulsars)
         updatecovwait: (int or None) number of iterations without distribution
                        update before covariance is adapted again
+        log10_t : bool
+            If True, CMA-ES optimizes in y = log10(t) space, optimal time vector
+            still returned in seconds.
 
         Returns
         _______
@@ -448,29 +452,40 @@ class OptimizeTime(object):
 
         # Initial guess x0 (in seconds)
         if self.t_int0 is not None:
-            x0 = np.array(self.t_int0, dtype=float)
-            if x0.shape[0] != N:
+            t0_lin = np.array(self.t_int0, dtype=float)
+            if t0_lin.shape[0] != N:
                 raise ValueError("'t_int0' has wrong length: {}, expected {}"
-                                 .format(x0.shape[0], N))
+                                 .format(t0_lin.shape[0], N))
         else:
-            # Start from roughly equal allocation of the total budget
-            x0 = np.full(N, self.t_int_maxtot / N, dtype=float)
 
-        # Clip x0 to per-pulsar box constraints
-        lower_bounds = np.full(N, float(self.t_int_min), dtype=float)
-        upper_bounds = self.t_int_max.astype(float)
-        x0 = np.clip(x0, lower_bounds, upper_bounds)
+            t0_lin = np.full(N, self.t_int_maxtot / N, dtype=float)
+        # Start from roughly equal allocation of the total budget
+        # Clip initial times to per-pulsar box constraints
+        t_lower = np.full(N, float(self.t_int_min), dtype=float)
+        t_upper = self.t_int_max.astype(float)
+        t0_lin = np.clip(t0_lin, t_lower, t_upper)
+
+        if log10_t:
+            # CMA variable is y = log10(t)
+            x0 = np.log10(t0_lin)
+            lower_bounds = np.log10(t_lower)
+            upper_bounds = np.log10(t_upper)
+        else:
+            # CMA variable is t itself (seconds)
+            x0 = t0_lin.copy()
+            lower_bounds = t_lower
+            upper_bounds = t_upper
 
         # Initialize PTA state and psrdict for hasasia
         # use interpolation if lookup table, otherwise call calc_timing
         if use_lut:
             # can't reset pta or it will clear LUT
-            self._set_sigma_interp_lut(x0)
+            self._set_sigma_interp_lut(t0_lin)
             instr_name_lut_depdt = self.instr_name + "_sigma_interp"
         else:
-            # Full calculation: reset PTA and compute sigmas for x0
+            # Full calculation: reset PTA and compute sigmas for t0_lin
             self._reset_pta_inplace()
-            self._set_t_int_vector(x0)
+            self._set_t_int_vector(t0_lin)
             instr_name_lut_depdt = self.instr_name_opt
             calc_timing(self.pta,
                         self.nus,
@@ -499,12 +514,12 @@ class OptimizeTime(object):
             "seed": int(seed),
             "verb_disp": int(bool(verbose)),
             "maxfevals": int(self.max_evals),
-            "bounds": [lower_bounds, upper_bounds],
+            "bounds": [lower_bounds, upper_bounds],  # in CMA variable space
         }
 
         # Optional tuning parameters
         if popsize is not None:
-            opts["popsize"] = popsize
+            opts["popsize"] = int(popsize)
         else:
             # Default heuristic: 4 + 3 * log(N)
             opts["popsize"] = int(4 + 3 * np.log(N))
@@ -516,20 +531,28 @@ class OptimizeTime(object):
         if updatecovwait is not None:
             opts["updatecovwait"] = int(updatecovwait)
 
-        def objective(t_vec):
+        def objective(x_cma):
             """
             Objective for CMA-ES: minimize -SNR + penalty
             where penalty enforces sum(t_i) ≈ t_int_maxtot.
+
+            x_cma is either:
+              - t_vec (seconds)           if log10_t == False
+              - y_vec = log10(t_vec)      if log10_t == True
             """
-            t_vec = np.asarray(t_vec, dtype=float)
-            if t_vec.shape[0] != N:
+            x_cma = np.asarray(x_cma, dtype=float)
+            if x_cma.shape[0] != N:
+                return 1e9
+            if not np.all(np.isfinite(x_cma)):
                 return 1e9
 
-            if not np.all(np.isfinite(t_vec)):
-                return 1e9
+            # Map CMA variable -> linear times
+            if log10_t:
+                t_vec = 10.0 ** x_cma
+            else:
+                t_vec = x_cma
 
-            # Total time budget penalty
-            # penalty = penalty_weight * ((sum(t) - t_int_maxtot)/t_int_maxtot)^2
+            # Total time budget penalty in linear space
             total_time = float(np.sum(t_vec))
             rel_err = (total_time - self.t_int_maxtot) / self.t_int_maxtot
             penalty = penalty_weight * (rel_err ** 2)
@@ -539,20 +562,17 @@ class OptimizeTime(object):
                     snr = self.evaluate_snr_from_lut(psrdict, t_vec)
                 else:
                     snr = self.evaluate_snr(psrdict, t_vec)
-            except Exception:
-                # Any failure => very bad candidate
+            except NotImplementedError:
                 return 1e9
 
             if not np.isfinite(snr):
                 return 1e9
 
-            # CMA-ES minimizes the objective
             return -float(snr) + penalty
 
         # Initialize CMA-ES
         es = cma.CMAEvolutionStrategy(x0, float(sigma0), opts)
 
-        # Optimization loop
         while not es.stop():
             X = es.ask()                    # list of candidate t_vecs
             fX = [objective(x) for x in X]  # their objective values
@@ -560,26 +580,35 @@ class OptimizeTime(object):
             if verbose:
                 es.disp()
 
-        # Best candidate found by CMA (in terms of the penalized objective)
-        x_star = np.array(es.result.xbest, dtype=float)
-        # Clip to safety (should already satisfy bounds due to CMA)
-        x_star = np.clip(x_star, lower_bounds, upper_bounds)
+        # Best candidate in CMA variable space
+        x_best = np.array(es.result.xbest, dtype=float)
 
-        # Recompute SNR at x_star without penalty to get the true merit
-        if use_lut:
-            snr_star = self.evaluate_snr_from_lut(psrdict, x_star)
+        # Map back to linear times
+        if log10_t:
+            t_star = 10.0 ** x_best
         else:
-            snr_star = self.evaluate_snr(psrdict, x_star)
+            t_star = x_best
+
+        # Enforce box constraints in linear space for safety
+        t_star = np.clip(t_star, t_lower, t_upper)
+
+        # True SNR at t_star (no penalty)
+        if use_lut:
+            snr_star = self.evaluate_snr_from_lut(psrdict, t_star)
+        else:
+            snr_star = self.evaluate_snr(psrdict, t_star)
 
         # Check how well the total-time constraint is satisfied
-        total_time_star = float(np.sum(x_star))
+        total_time_star = float(np.sum(t_star))
         rel_err_star = (total_time_star - self.t_int_maxtot) / self.t_int_maxtot
         if abs(rel_err_star) > 1e-2:
             warn("CMA solution deviates from time budget by {:.2%} "
                  "(sum(t) = {}, budget = {})."
                  .format(rel_err_star, total_time_star, self.t_int_maxtot))
+
         # save optimal times in optimum dict
-        for x, p in zip(x_star, self.pta.psrlist):
+        for ti, p in zip(t_star, self.pta.psrlist):
             p.optimum.update({self.instr_name_opt: {}})
-            p.optimum[self.instr_name_opt]["t_int"] = x
-        return x_star, float(snr_star)
+            p.optimum[self.instr_name_opt]["t_int"] = float(ti)
+
+        return t_star, float(snr_star)
