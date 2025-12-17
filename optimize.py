@@ -1,6 +1,7 @@
 from os import path
 from warnings import warn
 from scipy.interpolate import PchipInterpolator
+from scipy.optimize import minimize
 import numpy as np
 import cma
 import PTAOptimizer.observatory_ops as oops
@@ -114,7 +115,7 @@ class OptimizeTime(object):
                  max_evals=2000,
                  max_workers=1):
         """
-        ___init___ function for the OptimizeFrequency class
+        ___init___ function for the OptimizeTime class
         """
         self.pta = pta
         self.nus = nus
@@ -123,18 +124,20 @@ class OptimizeTime(object):
         self.lat = lat
         self.scope_horizon = self.dec_lim[1] - self.lat + 90.
         self.epoch_days = epoch_days
+        self.t_int_maxtot = t_int_maxtot        
         self.t_int_min = t_int_min
-        self.t_int_max = np.array([oops.uptime(p.dec,
-                                                 self.lat,
-                                                 horiz=self.scope_horizon,
-                                                 epoch_days=self.epoch_days)
-                                   for p in self.pta.psrlist])
+        uptimes = np.array([oops.uptime(p.dec,
+                                        self.lat,
+                                        horiz=self.scope_horizon,
+                                        epoch_days=self.epoch_days)
+                            for p in self.pta.psrlist])
+        # clip per-pulsar max to total budget
+        self.t_int_max = np.clip(uptimes, None, self.t_int_maxtot)
         if t_int0 is not None and not len(t_int0) == len(self.pta.psrlist):
             raise ValueError("'t_int0' must have same shape as pta.psrlist: "
                              "({},) not {}".format(len(self.pta.psrlist),
                                                    len(t_int0)))
         self.t_int0 = t_int0
-        self.t_int_maxtot = t_int_maxtot
         self.timefac = timefac
         self.gainmodel = gainmodel
         self.gainexp = gainexp
