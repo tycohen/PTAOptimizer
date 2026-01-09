@@ -145,4 +145,89 @@ class test_rednoise_psd2charstrain(unittest.TestCase):
         np.testing.assert_allclose(red_alpha,
                                    red_alpha_answer,
                                    rtol=1e-10)
-       
+
+@ptzd.parameterized_class(("pulsar_sigma_tots",),
+                          [((.1, 10., 0.1, 0.01),),
+                           ((100, 20, 1e-3, 10),)])
+class test_quadratic_form_snr_white_noise_only(unittest.TestCase):
+    """
+    Test gravitational_waves.build_W_matrix and 
+    gravitational_waves.build_Q_matrix
+    """
+    def setUp(self):
+        # initialize pulsars with empty sigma dicts to be filled by ptzd
+        self.pulsar1 = Pulsar(name="testpulsar1",
+                              dec=90.,
+                              ra=180.,
+                              sigmas={"test_config": {"sigma_tot": None}})
+        self.pulsar2 = Pulsar(name="testpulsar2",
+                              dec=0.,
+                              ra=0.,
+                              sigmas={"test_config": {"sigma_tot": None}})
+        self.pulsar3 = Pulsar(name="testpulsar3",
+                              dec=45.,
+                              ra=270.,
+                              sigmas={"test_config": {"sigma_tot": None}})
+        self.pulsar4 = Pulsar(name="testpulsar4",
+                              dec=60.,
+                              ra=270.,
+                              sigmas={"test_config": {"sigma_tot": None}})
+        self.pta = PTA(psrlist=[self.pulsar1,
+                                self.pulsar2,
+                                self.pulsar3,
+                                self.pulsar4])
+        for p, s in zip(self.pta.psrlist, self.pulsar_sigma_tots):
+            p.sigmas["test_config"]["sigma_tot"] = s
+        self.timespan_yr = 15.
+        self.cadence = 12
+        self.n_freqs = 400
+        self.psrdict = gw.get_hasasia_psrs(self.pta, "test_config",
+                                           timespan_yr=self.timespan_yr,
+                                           cadence=self.cadence,
+                                           n_freqs=self.n_freqs,
+                                           use_best_instr=False,
+                                           # GWB RN enters Q only through S_h(f)
+                                           # not S_eff(f)
+                                           gwb_strainamp=2.4e-15,
+                                           gwb_spindex=-2/3,
+                                           return_sencurve=False)
+
+    def test_quadratic_form_snr_consistency_with_hasasia(self):
+        """
+        Test that p^T * Q * p gives same S/N as
+        hasasia.GWBSensitivityCurve.SNR, where p[i] = sigma[i] ** -2
+        """
+        sigmas_sec = np.array([p.sigmas["test_config"]["sigma_tot"] / 1e6
+                               for p in self.pta.psrlist]) 
+        invsig2 =  sigmas_sec ** -2 
+        Q = gw.build_Q_matrix(self.psrdict)
+        snr_quadratic = np.sqrt(np.dot(np.dot(invsig2.T, Q), invsig2))
+
+        # pulsar noise needs to not contain GWB, but S/N needs to be computed
+        # on GWB spectrum so can't use gw.gwb_snr
+        names = [p.name for p in self.psrdict["psrs"].values()]
+        phis = np.array([p.phi for p in self.psrdict["psrs"].values()])
+        thetas = np.array([p.theta for p in self.psrdict["psrs"].values()])
+        # initialize pulsars with no GWB contribution to S_eff(f)
+        psrs = hsim.sim_pta(psr_names=names,
+                            timespan=self.timespan_yr,
+                            cad=self.cadence,
+                            sigma=sigmas_sec,
+                            phi=phis,
+                            theta=thetas,
+                            A_gwb=0.,
+                            alpha_gwb=0.,
+                            freqs=self.psrdict["freqs"])
+        hs_spectra = []
+        for p in psrs:
+            sp = hsen.Spectrum(p, freqs=self.psrdict["freqs"])
+            sp.NcalInv
+            hs_spectra.append(sp)
+        scurve = hsen.GWBSensitivityCurve(hs_spectra)
+        Sh = hsen.S_h(2.4e-15,
+                      -2/3,
+                      self.psrdict["freqs"])
+        snr_hasasia = scurve.SNR(Sh)
+        np.testing.assert_allclose(snr_quadratic,
+                                   snr_hasasia,
+                                   rtol=1e-8)

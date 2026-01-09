@@ -179,6 +179,63 @@ def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_gamma):
                 + sp.add_red_noise_power(rnamp, rnidx, vals=True) \
                 + sp.add_red_noise_power(gwb_amp, gwb_gamma, vals=True)
     return new_psd
+
+def build_W_matrix(psrdict):
+    """
+    Compute the noise-independent W matrix for white noise-only GWB S/N
+
+    .. math::
+    {\bf W}_{IJ} =     
+        \begin{cases}
+            \frac{1}{2}\frac{T_{IJ}}{T_{\rm obs}}\chi_{IJ}, & I \neq J\\
+            0, & I=J
+        \end{cases}
+    """
+    phis = np.array([p.phi for p in psrdict["psrs"].values()])
+    thetas = np.array([p.theta for p in psrdict["psrs"].values()])
+    ThetaIJ, chi_IJ, pairs, chiRSS = hsen.HellingsDownsCoeff(phis, thetas)
+    T_obs = hsen.get_Tspan(list(psrdict["psrs"].values()))
+    spectra = list((psrdict["spectra"].values()))
+    T_IJ = np.array([hsen.get_TspanIJ(spectra[ii], spectra[jj])
+                     for ii, jj in zip(pairs[0], pairs[1])])
+    w_unraveled = .5 * T_IJ * (chi_IJ ** 2) / T_obs
+    N = len(psrdict["psrs"])
+    W = np.zeros((N, N))
+    # symmetric, zero-diagonal
+    W[pairs[0], pairs[1]] = w_unraveled
+    W[pairs[1], pairs[0]] = w_unraveled
+    return W
+
+def build_Q_matrix(psrdict):
+    """
+    Compute the noise-independent Q matrix for white noise-only GWB S/N
+    that can satisfy the quadratic form :math: `\rho^2 = p^T {\bf Q} p`
+
+    .. math::
+        
+    {\bf Q} = 2T_\mathrm{obs}
+    \left[\int^{f_\mathrm{Nyq}} df S_h(f)^2 
+    \left(\frac{\mathcal{T(f)}\mathcal{R}(f)}{2\Delta t}\right)^2 \right]{\bf W}
+
+    where p[i] = sigma[i] ** -2
+    """
+    T_obs = hsen.get_Tspan(list(psrdict["psrs"].values()))
+    Tfs = [s.Tf for s in list(psrdict["spectra"].values())]
+    Tf0 = Tfs[0]
+    if not all([np.array_equal(Tf0, t) for t in Tfs[1:]]):
+        raise ValueError("hasasia.sensitivity.Spectrum.Tf must be "
+                         "the same for all spectra in psrdict")
+    delta_t = SECS_PER_YEAR / psrdict["cadence"]
+    Rf = hsen.resid_response(psrdict["freqs"])
+    Sh = hsen.S_h(psrdict["gwb_strainamp"],
+                  psrdict["gwb_spindex"],
+                  psrdict["freqs"])
+    integrand = (Sh * Tf0 * Rf / (2 * delta_t)) ** 2
+    integral = np.trapz(y=integrand,
+                        x=psrdict["freqs"],
+                        axis=0)
+    W = build_W_matrix(psrdict)
+    return 2 * T_obs * integral * W
     
 def rednoise_psd2charstrain(amp_red, gamma_red):
     """
