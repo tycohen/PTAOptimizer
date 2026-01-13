@@ -246,15 +246,21 @@ class OptimizeTime(object):
                 p.t_int = {}
             p.t_int[instr_name] = float(ti)
 
-    def interp_sigma(self, pulsar, tint_find):
+    def sigma_interpolator(self, pulsar):
         """
-        interpolate sigma_tot(tint) for a single pulsar at tint=tint_find
+        return PchipInterpolator of sigma_tot(tint) for a single pulsar
         """
         tint = [pulsar.t_int[k] for k in self.tint_grid_names]
         sigma = [pulsar.sigmas[k + self.optstr]["sigma_tot"]
                  for k in self.tint_grid_names]
         f = PchipInterpolator(tint, sigma)
-        return f(tint_find)
+        return f
+            
+    def interp_sigma(self, pulsar, tint_find):
+        """
+        evaluate interpolated sigma at tint_find
+        """
+        return self.sigma_interpolator(pulsar)(tint_find)
         
     def _set_sigma_interp_lut(self, t_vec):
         """
