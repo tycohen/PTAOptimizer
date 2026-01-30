@@ -274,20 +274,6 @@ class OptimizeTime(object):
             p.sigmas[interp_key] = {}
             p.sigmas[interp_key]["sigma_tot"] = self.interp_sigma(p, ti)
             
-    def _project_to_feasible(self, x):
-        """
-        Enforce t_int_min ≤ x_i ≤ t_int_max[i] and sum(x) ≤ t_int_maxtot.
-        Clip to box, then scale down proportionally if over budget.
-        """
-        y = np.clip(np.asarray(x, dtype=float),
-                    self.t_int_min, self.t_int_max)
-        s = float(np.sum(y))
-        if s <= float(self.t_int_maxtot) + 1e-12:
-            return y
-        if s > 0.0:
-            y *= (float(self.t_int_maxtot) / s)
-        return np.minimum(y, self.t_int_max)
-
     def _feasible(self, x, tol=1e-10):
         x = np.asarray(x, dtype=float)
         return (x >= -tol).all() and (x <= self.t_int_max + tol).all() \
@@ -621,3 +607,73 @@ class OptimizeTime(object):
             p.optimum[self.instr_name_opt]["t_int"] = float(ti)
 
         return t_star, float(snr_star)
+
+    def project_to_budget_equality(self, x, tol=1e-12, max_iter=80):
+        """
+        Euclidean projection onto the feasible set
+
+            C = { t : sum(t) = B,  tmin <= t <= tmax }.
+
+        using the "capped simplex with lower bounds" projection:
+            t_i = clip(x_i - λ, tmin, tmax_i)
+        with λ chosen so that sum(t_i) = B.
+        """
+        x = np.asarray(x, dtype=float)
+        N = x.size
+        B = float(self.t_int_maxtot)
+        lo = np.full(N, float(self.t_int_min))
+        hi = np.asarray(self.t_int_max, dtype=float).reshape(N)
+
+        if np.any(hi < lo):
+            raise ValueError("Infeasible bounds: some t_int_max < t_int_min.")
+
+        s_lo = float(lo.sum())
+        s_hi = float(hi.sum())
+        if not (s_lo - tol <= B <= s_hi + tol):
+            raise ValueError(
+                "Equality constraint infeasible: budget not in "
+                f"[sum(tmin), sum(tmax)] = [{s_lo}, {s_hi}], got {B}."
+            )
+
+        # If clipping already satisfies the budget, return immediately
+        t0 = np.clip(x, lo, hi)
+        s0 = float(t0.sum())
+        if abs(s0 - B) <= tol:
+            return t0
+
+        # g(λ) = sum(clip(x - λ, lo, hi)) - B, monotone decreasing in λ
+        def g(lam):
+            return float(np.clip(x - lam, lo, hi).sum() - B)
+
+        # Bracket the root
+        lam_lo = -1.0
+        lam_hi = 1.0
+
+        while g(lam_lo) < 0.0:
+            lam_lo *= 2.0
+        while g(lam_hi) > 0.0:
+            lam_hi *= 2.0
+
+        lam_mid = 0.0
+        for _ in range(max_iter):
+            lam_mid = 0.5 * (lam_lo + lam_hi)
+            val = g(lam_mid)
+
+            if abs(val) <= tol:
+                break
+
+            # g is decreasing in λ
+            if val > 0.0:
+                lam_lo = lam_mid
+            else:
+                lam_hi = lam_mid
+
+        t = np.clip(x - lam_mid, lo, hi)
+
+        # Final numerical guard
+        s = float(t.sum())
+        if abs(s - B) > 10 * tol:
+            raise RuntimeError("Projection did not converge: "
+                               "|sum(t)-B|={abs(s-B)} > {10*tol}. "
+                               "Try increasing max_iter or relaxing tol.")
+        return t
