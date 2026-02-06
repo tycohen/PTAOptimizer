@@ -677,3 +677,83 @@ class OptimizeTime(object):
                                "|sum(t)-B|={abs(s-B)} > {10*tol}. "
                                "Try increasing max_iter or relaxing tol.")
         return t
+
+    def interp_sigmadot(self, pulsar, tint):
+        """
+        evaluate :math: `\dot{\sigma}_i(t)` for pulsar i at t=tint
+        """
+        sigdot_t_i = self.sigma_interpolator(pulsar).derivative()(tint)
+        return sigdot_t_i
+
+    def _wn_sigma_and_sigmadot_seconds(self, t_vec):
+        """
+        Return per-pulsar sigma(t) and sigmadot(t) in seconds
+        for WN-only quadratic form using LUT interpolation
+
+        t_vec in seconds
+        """
+        t_vec = np.asarray(t_vec, dtype=float)
+        N = len(self.pta.psrlist)
+        if t_vec.shape != (N,):
+            raise ValueError(f"t_vec must have shape ({N},), got {t_vec.shape}")
+
+        # sigma(t) from LUT+PCHIP (microseconds), then convert to seconds
+        sigma_us = np.array([self.interp_sigma(p, ti)
+                             for p, ti in zip(self.pta.psrlist, t_vec)],
+                            dtype=float)
+        # sigmadot(t) from us/s, then convert to s/s
+        sigmadot_us_per_s = np.array([self.interp_sigmadot(p, ti)
+                                      for p, ti in zip(self.pta.psrlist, t_vec)],
+                                     dtype=float)
+        sigma_s = sigma_us * 1e-6
+        sigmadot_s_per_s = sigmadot_us_per_s * 1e-6
+
+        if np.any(~np.isfinite(sigma_s)) or np.any(~np.isfinite(sigmadot_s_per_s)):
+            raise ValueError("Non-finite sigma or sigmadot encountered "
+                             "in interpolation.")
+        if np.any(sigma_s <= 0.0):
+            raise ValueError("Non-positive sigma encountered.")
+        return sigma_s, sigmadot_s_per_s
+
+    def wn_objective_and_grad(self, t_vec, Qmat):
+        """
+        White-noise-only quadratic objective and analytic gradient:
+
+            F(t) = rho^2(t) = p(t)^T Q p(t),   p_i(t_i) = sigma_i(t_i)^{-2}.
+
+        Gradient:
+            dF/dt_i = -4 * sigma_i(t_i)^(-3) * sigmadot_i(t_i) * (Q p(t))_i
+
+        Parameters
+        ----------
+        t_vec : array-like, shape (N,)
+            Integration times in seconds 
+        Qmat : ndarray, shape (N, N)
+            Noise-independent Q matrix (WN-only quadratic form).
+
+        Returns
+        -------
+        F : float
+            rho^2
+        grad : ndarray, shape (N,)
+            dF/dt (units: rho^2 per second)
+        """
+        t_vec = np.asarray(t_vec, dtype=float)
+        sigma_s, sigmadot_s = self._wn_sigma_and_sigmadot_seconds(t_vec)
+
+        p = sigma_s ** -2
+        Qp = Qmat @ p
+        F = float(p @ Qp)
+
+        grad = -4.0 * (sigma_s ** -3) * sigmadot_s * Qp
+        return F, grad
+
+    def wn_objective_only(self, t_vec, Qmat):
+        """Convenience: return F(t)=p^T Q p only."""
+        F, _ = self.wn_objective_and_grad(t_vec, Qmat)
+        return F
+
+    def wn_grad_only(self, t_vec, Qmat):
+        """Convenience: return grad F(t) only."""
+        _, grad = self.wn_objective_and_grad(t_vec, Qmat)
+        return grad
