@@ -117,7 +117,9 @@ with the noise properties of the respective pulsars in
     return
 
 def gwb_snr(psrdict,
-            return_sencurve=False):
+            return_sencurve=False,
+            gwb_strainamp=None,
+            gwb_spindex=None):
     """
 Compute the S/N of a GWB from list of 
 hasasia.sensitivity.Spectrum objects
@@ -131,6 +133,10 @@ psrdict: dict
 return_sencurve: bool
        instead of returning just the S/N, return the 
        hasasia.sensitivity.GWBSensitivityCurve
+gwb_strainamp: float
+    if set, overrides value from psrdict when computing the GWB strain PSD
+gwb_spindex: float
+    if set, overrides value from psrdict when computing the GWB strain PSD
 Returns:
 _______
 
@@ -139,8 +145,12 @@ OR
 scurve: hasasia.sensitivity.GWBSensitivityCurve
     """
     scurve = hsen.GWBSensitivityCurve(list(psrdict["spectra"].values()))
-    Sh = hsen.S_h(psrdict["gwb_strainamp"],
-                  psrdict["gwb_spindex"],
+    if gwb_strainamp is None:
+        gwb_strainamp = psrdict["gwb_strainamp"]
+    if gwb_spindex is None:
+        gwb_spindex = psrdict["gwb_spindex"]
+    Sh = hsen.S_h(gwb_strainamp,
+                  gwb_spindex,
                   psrdict["freqs"])
     snr = scurve.SNR(Sh)
     if return_sencurve:

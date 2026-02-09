@@ -327,12 +327,24 @@ class OptimizeTime(object):
             raise ValueError("use_lut is True but lookup table is empty\n"
                              "call fill_tint_lookup_table first")
 
-    def snr_grid_search_on_lut(self, verbose=False):
+    def snr_grid_search_on_lut(self,
+                               snr_gwbamp=None,
+                               snr_gwbidx=None,
+                               verbose=False):
         """
         Perform a brute-force grid search for S/N from lookup-table sigmas
         Fills self.snr_grid_from_lut
         Computationally infeasible for PTAs of more than a few pulsars
         Doesn't handle non-timed pulsars
+
+        Parameters:
+        ----------
+        snr_gwbamp: float
+             GWB strain amplitude, if set overrides self.gwb_strainamp only
+             when computing the GWB strain PSD, S_h
+        snr_gwbidx: float
+             GWB Spectral index, if set overrides self.gwb_spindex only
+             when computing the GWB strain PSD, S_h
         """
         self._lut_check()
         if any([p.sigmas[k + self.optstr]["sigma_tot"] < 0.
@@ -355,7 +367,10 @@ class OptimizeTime(object):
                                       use_best_instr=False,
                                       gwb_strainamp=self.gwb_strainamp,
                                       gwb_spindex=self.gwb_spindex)
-        
+        if snr_gwbamp is None:
+            snr_gwbamp = psrdict["gwb_strainamp"]
+            snr_gwbidx = psrdict["gwb_spindex"]
+
         # loop over _tinti instrument tuples
         for idx in np.ndindex(shape):
             tint_keys = [instr_axes[k][idx[k]] for k in range(len(instr_axes))]
@@ -368,7 +383,10 @@ class OptimizeTime(object):
                 continue
             psrdict["instruments"] = sigma_keys
             gw.update_noise_spectra_approx(psrdict, self.pta)
-            self.snr_grid_from_lut[idx] = float(gw.gwb_snr(psrdict))
+            self.snr_grid_from_lut[idx] = float(gw.gwb_snr(
+                psrdict,
+                gwb_strainamp=snr_gwbamp,
+                gwb_spindex=snr_gwbidx))
         return
 
     def _grid_search_best_indices(self):
