@@ -757,3 +757,273 @@ class OptimizeTime(object):
         """Convenience: return grad F(t) only."""
         _, grad = self.wn_objective_and_grad(t_vec, Qmat)
         return grad
+
+    def _feasible_gradient_equal_bounds(self, t, gradF, eps_act=1e-10):
+        """
+        Build a 'feasible' gradient for constraints:
+            sum(t)=B,  tmin <= t <= tmax
+
+        We:
+          1) define free set as indices not near bounds,
+          2) subtract mean over free set to enforce equality-tangent direction,
+          3) zero components that would push active bounds outward (infeasible).
+
+        Returns
+        -------
+        g : ndarray, shape (N,)
+            gradient projected to feasible directions (ascent sense).
+        free_mask : ndarray[bool]
+            mask of free variables used for mean subtraction.
+        lam_hat : float or None
+            estimated lambda (mean grad over free set), None if no free vars.
+        """
+        t = np.asarray(t, float)
+        gradF = np.asarray(gradF, float)
+
+        N = t.size
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, float).reshape(N)
+
+        at_lo = t <= (tmin + eps_act)
+        at_hi = t >= (tmax - eps_act)
+        free = ~(at_lo | at_hi)
+
+        g = gradF.copy()
+
+        lam_hat = None
+        if np.any(free):
+            lam_hat = float(np.mean(g[free]))
+            g[free] = g[free] - lam_hat
+        else:
+            # fully clamped: no movement possible (or infeasible geometry)
+            g[:] = 0.0
+            return g, free, lam_hat
+
+        # Bound feasibility: if at lower bound, cannot decrease t -> if g<0, zero it
+        g[at_lo & (g < 0.0)] = 0.0
+        # if at upper bound, cannot increase t -> if g>0, zero it
+        g[at_hi & (g > 0.0)] = 0.0
+
+        # Ensure equality-tangent again on remaining free components (optional but stabilizing)
+        # This matters if we zeroed some free components due to near-bound logic.
+        free2 = (g != 0.0) & free
+        if np.any(free2):
+            g[free2] -= float(np.mean(g[free2]))
+
+        return g, free, lam_hat
+
+    def maximize_snr_projected_gradient(
+        self,
+        Qmat,
+        t0=None,
+        max_iter=200,
+        gtol=1e-6,
+        ftol=1e-12,
+        eps_act=1e-10,
+        alpha0=1.0,
+        alpha_min=1e-6,
+        alpha_max=100,
+        use_bb=True,
+        bb_variant=1,
+        c1=1e-4,
+        tau=0.5,
+        max_ls=40,
+        verbose=True,
+        return_history=True,
+    ):
+        """
+        Maximize F(t)=rho^2(t)=p(t)^T Q p(t) subject to:
+            sum(t)=t_int_maxtot and t_int_min <= t <= t_int_max
+
+        Uses projected gradient ascent with Armijo backtracking and hard projection
+        via project_to_budget_equality().
+
+        Returns
+        -------
+        t : ndarray
+            feasible optimizer iterate
+        F : float
+            objective value at t (rho^2)
+        info : dict
+            diagnostics + (optional) iteration history
+        """
+        N = len(self.pta.psrlist)
+        B = float(self.t_int_maxtot)
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, float).reshape(N)
+
+        # --- init t ---
+        if t0 is None:
+            # equal-time initial guess then project (handles bounds)
+            t0 = np.full(N, B / N, dtype=float)
+        t = self.project_to_budget_equality(t0)
+
+        # Evaluate objective and grad
+        F, gradF = self.wn_objective_and_grad(t, Qmat)
+        g, free_mask, lam_hat = self._feasible_gradient_equal_bounds(t, gradF, eps_act=eps_act)
+
+        #BB: initialize BB memory (previous iterate and feasible-gradient)
+        n_free = int(np.sum(free_mask))
+        t_prev = None
+        gradF_prev = None          
+        free_prev = None           
+        g_prev = None # no longer used
+        
+        hist = []
+        if return_history:
+            sum_err = float(t.sum() - B)
+            min_margin = float(np.min(t - tmin))
+            max_margin = float(np.min(tmax - t))
+            hist.append({
+                "iter": 0,
+                "F": F,
+                "gnorm_inf": float(np.max(np.abs(g))),
+                "n_free": int(np.sum(free_mask)),
+                "n_lo": int(np.sum(t <= (tmin + eps_act))),
+                "n_hi": int(np.sum(t >= (tmax - eps_act))),
+                "alpha": np.nan,
+                "ls_iters": 0,
+                "lam_hat": lam_hat,
+                "sum_err": sum_err,
+                "min_margin": min_margin,
+                "max_margin": max_margin
+            })
+
+        if verbose:
+            print(f"[0] F={F:.6e}  ||g||_inf={np.max(np.abs(g)):.3e}  free={np.sum(free_mask)}")
+
+        # --- main loop ---
+        for k in range(1, max_iter + 1):
+            gnorm = float(np.max(np.abs(g)))
+            if gnorm <= gtol:
+                if verbose:
+                    print(f"Converged: ||g||_inf={gnorm:.3e} <= {gtol}")
+                break
+
+            # Ascent direction: use feasible gradient directly
+            d = g
+
+            # directional derivative proxy (should be positive for ascent)
+            gTd = float(np.dot(g, d))
+            if gTd <= 0.0:
+                # fallback: something odd with projection/active-set; stop or reset
+                if verbose:
+                    print("Warning: non-ascent direction encountered (g·d<=0). Stopping.")
+                break
+
+            # line search with projection
+            #BB: choose step size alpha using raw gradF curvature
+            # on a stable-free subspace
+            if use_bb and (t_prev is not None) and (gradF_prev is not None) \
+               and (free_prev is not None):
+                s_full = t - t_prev
+                y_full = gradF - gradF_prev
+
+                #BB: restrict to indices free at BOTH iterates
+                # (avoid active-set / eps_act chatter)
+                bb_mask = free_mask & free_prev
+
+                s = s_full[bb_mask]
+                y = y_full[bb_mask]
+
+                sty = float(np.dot(s, y))
+                if bb_variant == 2:
+                    yty = float(np.dot(y, y))
+                    denom = yty
+                    num = -sty
+                else:
+                    sts = float(np.dot(s, s))
+                    denom = -sty
+                    num = sts
+
+                if (not np.isfinite(denom)) or (abs(denom) < 1e-30) or \
+                   (denom <= 0.0) or (not np.isfinite(num)):
+                    alpha = float(alpha0)
+                else:
+                    alpha = float(num / denom)
+            else:
+                alpha = float(alpha0)
+            # clip alpha
+            alpha = min(alpha, alpha_max)
+            alpha = max(alpha, alpha_min)
+            F_old = F
+            ls_iters = 0
+
+            for ls in range(max_ls):
+                ls_iters = ls + 1
+                t_trial = self.project_to_budget_equality(t + alpha * d)
+                F_trial = self.wn_objective_only(t_trial, Qmat)
+
+
+                # Armijo sufficient increase condition using the
+                # *realized projected step*
+                s_trial = t_trial - t
+                # If projection didn't move us, no amount of backtracking will help.
+                if not np.any(s_trial):
+                    break 
+                armijo_rhs = F_old + c1 * float(np.dot(g, s_trial))
+                if F_trial >= armijo_rhs:
+                    #BB: store previous accepted iterate before updating
+                    t_prev = t.copy()
+                    gradF_prev = gradF.copy()     
+                    free_prev = free_mask.copy()  
+                    g_prev = g.copy()
+
+                    # accept
+                    t = t_trial
+                    F, gradF = self.wn_objective_and_grad(t, Qmat)
+                    g, free_mask, lam_hat = self._feasible_gradient_equal_bounds(t, gradF, eps_act=eps_act)
+                    # fix t_prev and g_prev for 1 iter if bounds hit
+                    if int(np.sum(free_mask)) != n_free:
+                        t_prev = None
+                        gradF_prev = None      #BB:
+                        free_prev = None       #BB:
+                        g_prev = None          # optional / legacy
+                        n_free = int(np.sum(free_mask))
+                    break
+
+                alpha *= tau
+
+            else:
+                # line search failed
+                if verbose:
+                    print("Line search failed to find improvement. Stopping.")
+                break
+
+            if return_history:
+                sum_err = float(t.sum() - B)
+                min_margin = float(np.min(t - tmin))
+                max_margin = float(np.min(tmax - t))
+                hist.append({
+                    "iter": k,
+                    "F": F,
+                    "t": t.copy(),
+                    "gnorm_inf": float(np.max(np.abs(g))),
+                    "n_free": int(np.sum(free_mask)),
+                    "n_lo": int(np.sum(t <= (tmin + eps_act))),
+                    "n_hi": int(np.sum(t >= (tmax - eps_act))),
+                    "alpha": alpha,
+                    "ls_iters": ls_iters,
+                    "lam_hat": lam_hat,
+                    "sum_err": sum_err,
+                    "min_margin": min_margin,
+                    "max_margin": max_margin
+                })
+
+            if verbose and (k % 5 == 0 or k == 1):
+                dF = F - F_old
+                print(f"[{k}] F={F:.6e}  dF={dF:.3e}  ||g||_inf={np.max(np.abs(g)):.3e}  alpha={alpha:.2e}  free={np.sum(free_mask)}")
+
+            # objective stall criterion (optional)
+            if abs(F - F_old) <= ftol * max(1.0, abs(F_old)):
+                if verbose:
+                    print(f"Stalled: |dF|={abs(F-F_old):.3e} <= ftol*scale")
+                break
+
+        info = {
+            "n_iter": (hist[-1]["iter"] if return_history else k),
+            "F": F,
+            "t": t,
+            "history": hist if return_history else None,
+        }
+        return t, F, info
