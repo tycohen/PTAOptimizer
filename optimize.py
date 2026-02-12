@@ -626,7 +626,7 @@ class OptimizeTime(object):
 
         return t_star, float(snr_star)
 
-    def project_to_budget_equality(self, x, tol=1e-12, max_iter=80):
+    def project_to_budget_equality(self, x, tol=1e-8, max_iter=80):
         """
         Euclidean projection onto the feasible set
 
@@ -692,8 +692,10 @@ class OptimizeTime(object):
         s = float(t.sum())
         if abs(s - B) > 10 * tol:
             raise RuntimeError("Projection did not converge: "
-                               "|sum(t)-B|={abs(s-B)} > {10*tol}. "
-                               "Try increasing max_iter or relaxing tol.")
+                               "|sum(t)-B|={} > {}. "
+                               "Try increasing max_iter or "
+                               "relaxing tol.".format(abs(s-B),
+                                                      10*tol))
         return t
 
     def interp_sigmadot(self, pulsar, tint):
@@ -880,6 +882,33 @@ class OptimizeTime(object):
         F, gradF = self.wn_objective_and_grad(t, Qmat)
         g, free_mask, lam_hat = self._feasible_gradient_equal_bounds(t, gradF, eps_act=eps_act)
 
+        #KKT: classify active sets
+        at_lo = t <= (tmin + eps_act)
+        at_hi = t >= (tmax - eps_act)
+        free  = ~(at_lo | at_hi)
+
+        #KKT: lambda estimate (fallback if no free vars)
+        if lam_hat is None:
+            # if fully clamped, nothing to do; treat as converged or break
+            lam = float(np.mean(gradF))
+        else:
+            lam = float(lam_hat)
+
+        #KKT: residuals for a maximization problem
+        if np.any(free):
+            r_free = float(np.max(np.abs(gradF[free] - lam)))
+        else:
+            r_free = 0.0
+        if np.any(at_lo):            
+            r_lo = float(np.max(np.maximum(0.0, gradF[at_lo] - lam)))
+        else:
+            r_lo = 0.0
+        if np.any(at_hi):            
+            r_hi = float(np.max(np.maximum(0.0, lam - gradF[at_hi])))
+        else:
+            r_hi = 0.0
+        kkt_resid = max(r_free, r_lo, r_hi)
+        
         #BB: initialize BB memory (previous iterate and feasible-gradient)
         n_free = int(np.sum(free_mask))
         t_prev = None
@@ -896,6 +925,7 @@ class OptimizeTime(object):
                 "iter": 0,
                 "F": F,
                 "gnorm_inf": float(np.max(np.abs(g))),
+                "kkt_resid": kkt_resid,
                 "n_free": int(np.sum(free_mask)),
                 "n_lo": int(np.sum(t <= (tmin + eps_act))),
                 "n_hi": int(np.sum(t >= (tmax - eps_act))),
@@ -912,10 +942,10 @@ class OptimizeTime(object):
 
         # --- main loop ---
         for k in range(1, max_iter + 1):
-            gnorm = float(np.max(np.abs(g)))
-            if gnorm <= gtol:
+            #KKT: convergence test (instead of ||g||)
+            if kkt_resid <= gtol:
                 if verbose:
-                    print(f"Converged: ||g||_inf={gnorm:.3e} <= {gtol}")
+                    print(f"Converged: KKT_resid={kkt_resid:.3e} <= {gtol}")
                 break
 
             # Ascent direction: use feasible gradient directly
@@ -966,31 +996,90 @@ class OptimizeTime(object):
             alpha = max(alpha, alpha_min)
             F_old = F
             ls_iters = 0
-
+            accepted = False
             for ls in range(max_ls):
                 ls_iters = ls + 1
                 t_trial = self.project_to_budget_equality(t + alpha * d)
                 F_trial = self.wn_objective_only(t_trial, Qmat)
 
+                #DIAG: unprojected trial and projection correction
+                u = t + alpha * d                 # pre-projection trial
+                s_raw = u - t                     # = alpha*d
+                s_eff = t_trial - t               # realized step after projection
+                proj_corr = t_trial - u           # what projection changed
+
+                #DIAG: predicted directional derivatives (raw vs realized)
+                pred_raw = float(np.dot(gradF, s_raw))
+                pred_eff = float(np.dot(gradF, s_eff))
+                
+                #DIAG: relative size of projection effect
+                raw_norm = float(np.linalg.norm(s_raw))
+                corr_norm = float(np.linalg.norm(proj_corr))
+                eff_norm = float(np.linalg.norm(s_eff))
+                proj_ratio = (corr_norm / raw_norm) if raw_norm > 0 else np.nan
 
                 # Armijo sufficient increase condition using the
                 # *realized projected step*
                 s_trial = t_trial - t
-                # If projection didn't move us, no amount of backtracking will help.
                 if not np.any(s_trial):
-                    break 
-                armijo_rhs = F_old + c1 * float(np.dot(g, s_trial))
+                    # projection didn't move: no backtracking will help
+                    accepted = False
+                    break
+                # Armijo using the realized projected step and the true gradient
+                pred = float(np.dot(gradF, s_trial))
+                if pred <= 0.0:
+                    alpha *= tau
+                    continue
+
+                armijo_rhs = F_old + c1 * pred
                 if F_trial >= armijo_rhs:
                     #BB: store previous accepted iterate before updating
                     t_prev = t.copy()
                     gradF_prev = gradF.copy()     
                     free_prev = free_mask.copy()  
                     g_prev = g.copy()
-
+                    #DIAG: cache accepted-step diagnostics before overwriting t
+                    t_before = t.copy()
+                    u_acc = u.copy()                   # from DIAG section above
+                    s_raw_acc = s_raw.copy()
+                    s_eff_acc = s_eff.copy()
+                    proj_corr_acc = proj_corr.copy()
+                    pred_raw_acc = pred_raw
+                    pred_eff_acc = pred_eff
+                    proj_ratio_acc = proj_ratio
+                    
                     # accept
                     t = t_trial
                     F, gradF = self.wn_objective_and_grad(t, Qmat)
                     g, free_mask, lam_hat = self._feasible_gradient_equal_bounds(t, gradF, eps_act=eps_act)
+
+                    #KKT: classify active sets
+                    at_lo = t <= (tmin + eps_act)
+                    at_hi = t >= (tmax - eps_act)
+                    free  = ~(at_lo | at_hi)
+
+                    #KKT: lambda estimate (fallback if no free vars)
+                    if lam_hat is None:
+                        # if fully clamped, nothing to do; treat as converged or break
+                        lam = float(np.mean(gradF))
+                    else:
+                        lam = float(lam_hat)
+
+                    #KKT: residuals for a maximization problem
+                    if np.any(free):
+                        r_free = float(np.max(np.abs(gradF[free] - lam)))
+                    else:
+                        r_free = 0.0
+                    if np.any(at_lo):            
+                        r_lo = float(np.max(np.maximum(0.0, gradF[at_lo] - lam)))
+                    else:
+                        r_lo = 0.0
+                    if np.any(at_hi):            
+                        r_hi = float(np.max(np.maximum(0.0, lam - gradF[at_hi])))
+                    else:
+                        r_hi = 0.0
+                    kkt_resid = max(r_free, r_lo, r_hi)
+                    
                     # fix t_prev and g_prev for 1 iter if bounds hit
                     if int(np.sum(free_mask)) != n_free:
                         t_prev = None
@@ -998,16 +1087,20 @@ class OptimizeTime(object):
                         free_prev = None       #BB:
                         g_prev = None          # optional / legacy
                         n_free = int(np.sum(free_mask))
+                    accepted = True
                     break
-
-                alpha *= tau
-
+                else:
+                    alpha *= tau
             else:
                 # line search failed
                 if verbose:
                     print("Line search failed to find improvement. Stopping.")
                 break
-
+            if not accepted:
+                if verbose:
+                    print("Line search failed (no acceptable projected step)."
+                          " Stopping.")
+                break
             if return_history:
                 sum_err = float(t.sum() - B)
                 min_margin = float(np.min(t - tmin))
@@ -1017,6 +1110,7 @@ class OptimizeTime(object):
                     "F": F,
                     "t": t.copy(),
                     "gnorm_inf": float(np.max(np.abs(g))),
+                    "kkt_resid": kkt_resid,
                     "n_free": int(np.sum(free_mask)),
                     "n_lo": int(np.sum(t <= (tmin + eps_act))),
                     "n_hi": int(np.sum(t >= (tmax - eps_act))),
@@ -1025,7 +1119,15 @@ class OptimizeTime(object):
                     "lam_hat": lam_hat,
                     "sum_err": sum_err,
                     "min_margin": min_margin,
-                    "max_margin": max_margin
+                    "max_margin": max_margin,
+                    "t_before": t_before,              # optional
+                    "u": u_acc,                        # optional
+                    "s_raw": s_raw_acc,
+                    "s_eff": s_eff_acc,
+                    "proj_corr": proj_corr_acc,
+                    "pred_raw": pred_raw_acc,
+                    "pred_eff": pred_eff_acc,
+                    "proj_ratio": proj_ratio_acc,
                 })
 
             if verbose and (k % 5 == 0 or k == 1):
