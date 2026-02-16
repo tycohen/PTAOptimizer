@@ -393,9 +393,15 @@ class OptimizeTime(object):
         if self.snr_grid_from_lut is None:
             raise ValueError("snr_grid_from_lut is None\n"
                              "Run snr_grid_search_on_lut first")
-        flat = np.nan_to_num(self.snr_grid_from_lut,
-                             nan=-np.inf)
-        return np.unravel_index(np.argmax(flat), flat.shape)
+        grid = self.snr_grid_from_lut
+        nan_mask = np.isnan(grid)
+        # NaNs to -inf, get max, then mutate back. Memory efficient, no copies
+        grid[nan_mask] = -np.inf
+        try:
+            flat_best = np.argmax(grid)
+        finally:
+            grid[nan_mask] = np.nan
+        return np.unravel_index(flat_best, grid.shape)
 
     def optimum_tint_grid(self):
         """
@@ -732,7 +738,11 @@ class OptimizeTime(object):
             raise ValueError("Non-finite sigma or sigmadot encountered "
                              "in interpolation.")
         if np.any(sigma_s <= 0.0):
-            raise ValueError("Non-positive sigma encountered.")
+            raise ValueError("Non-positive sigma encountered.\n"
+                             "t_vec = {}\n"
+                             "sigma = {}\nsigma_dot = {}".format(t_vec,
+                                                                 sigma_s,
+                                                                 sigmadot_s_per_s))
         return sigma_s, sigmadot_s_per_s
 
     def wn_objective_and_grad(self, t_vec, Qmat):
@@ -924,6 +934,7 @@ class OptimizeTime(object):
             hist.append({
                 "iter": 0,
                 "F": F,
+                "gradF": gradF.copy(),
                 "gnorm_inf": float(np.max(np.abs(g))),
                 "kkt_resid": kkt_resid,
                 "n_free": int(np.sum(free_mask)),
@@ -1109,6 +1120,7 @@ class OptimizeTime(object):
                     "iter": k,
                     "F": F,
                     "t": t.copy(),
+                    "gradF": gradF.copy(),
                     "gnorm_inf": float(np.max(np.abs(g))),
                     "kkt_resid": kkt_resid,
                     "n_free": int(np.sum(free_mask)),
@@ -1147,3 +1159,332 @@ class OptimizeTime(object):
             "history": hist if return_history else None,
         }
         return t, F, info
+
+    def dependent_pulsar_for_equality_reparam(self,
+                                              Qmat,
+                                              t_ref=None,
+                                              eps_act=1e-10,
+                                              eps_score=1e-30):
+        """
+        Choose dependent index k for equality-elimination reparam using
+        score = slack / (eps + |gradF_i - median(gradF)|).
+
+        Uses WN-only grad (wn_objective_and_grad). Later you can swap this
+        to full-objective grad with the same interface.
+        """
+        N = len(self.pta.psrlist)
+        B = float(self.t_int_maxtot)
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, float).reshape(N)
+
+        # Reference point
+        if t_ref is None:
+            t_ref = np.full(N, B / N, dtype=float)
+        t_ref = self.project_to_budget_equality(t_ref)
+
+        # Raw gradient at reference
+        _, gradF = self.wn_objective_and_grad(t_ref, Qmat)
+        gradF = np.asarray(gradF, dtype=float)
+
+        # Slack at reference (distance to nearest bound)
+        slack_lo = t_ref - tmin
+        slack_hi = tmax - t_ref
+        slack = np.minimum(slack_lo, slack_hi)
+
+        # Avoid choosing a pulsar already (near) active by eps_act
+        at_lo = t_ref <= (tmin + eps_act)
+        at_hi = t_ref >= (tmax - eps_act)
+        active = at_lo | at_hi
+
+        # Robust center of gradients: median over non-active entries if possible
+        if np.any(~active):
+            g_med = float(np.median(gradF[~active]))
+        else:
+            g_med = float(np.median(gradF))
+
+        # Score formula
+        denom = eps_score + np.abs(gradF - g_med)
+        score = slack / denom
+
+        # Invalidate active / zero-slack / non-finite candidates
+        bad = active | (slack <= 0.0) | (~np.isfinite(score))
+        score = score.copy()
+        score[bad] = -np.inf
+
+        k = int(np.argmax(score))
+
+        # If everything is invalid (should be rare), fall back to max slack
+        if not np.isfinite(score[k]):
+            slack2 = slack.copy()
+            slack2[~np.isfinite(slack2)] = -np.inf
+            k = int(np.argmax(slack2))
+
+        return k
+
+    def _reparam_split_indices(self, k):
+        """Return list of free indices (all except k), in ascending order."""
+        N = len(self.pta.psrlist)
+        if k < 0 or k >= N:
+            raise ValueError(f"k out of range: {k} for N={N}")
+        idx_free = [i for i in range(N) if i != k]
+        return idx_free
+
+    def t_from_free_y(self, y, k):
+        """
+        Map reduced variable y (= t for all i != k) to full feasible candidate t
+        by setting:
+            t_i = y_i for i != k
+            t_k = B - sum_{i != k} t_i
+        Does NOT clip; caller decides how to handle infeasibility.
+        """
+        y = np.asarray(y, dtype=float)
+        N = len(self.pta.psrlist)
+        idx_free = self._reparam_split_indices(k)
+        if y.shape != (len(idx_free),):
+            raise ValueError(f"y must have shape ({len(idx_free)},), got {y.shape}")
+
+        B = float(self.t_int_maxtot)
+
+        t = np.empty(N, dtype=float)
+        t[idx_free] = y
+        t[k] = B - float(np.sum(y))
+        return t
+
+    def free_y_from_t(self, t, k):
+        """Inverse map: drop component k."""
+        t = np.asarray(t, dtype=float)
+        N = len(self.pta.psrlist)
+        if t.shape != (N,):
+            raise ValueError(f"t must have shape ({N},), got {t.shape}")
+        idx_free = self._reparam_split_indices(k)
+        return t[idx_free].copy()
+
+    def reparam_free_bounds(self, k):
+        """
+        Bounds for y variables in reduced problem.
+        Since y_i are literally t_i for i != k, bounds are just box bounds:
+            tmin <= y_i <= tmax_i
+        The dependent feasibility (t_k bounds) is handled separately (penalty).
+        """
+        N = len(self.pta.psrlist)
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, dtype=float).reshape(N)
+        idx_free = self._reparam_split_indices(k)
+        bounds = [(tmin, float(tmax[i])) for i in idx_free]
+        return bounds
+
+    def _dependent_bound_violation(self, t, k):
+        """
+        Return (v, side) where v is signed violation magnitude for t_k:
+          - if t_k < tmin: v = tmin - t_k > 0   (lower violation)
+          - if t_k > tmax_k: v = t_k - tmax_k > 0 (upper violation)
+          - else: v = 0
+        side in {"lo","hi",None}
+        """
+        tmin = float(self.t_int_min)
+        tmax = float(np.asarray(self.t_int_max, dtype=float).reshape(-1)[k])
+        tk = float(t[k])
+        if tk < tmin:
+            return (tmin - tk), "lo"
+        if tk > tmax:
+            return (tk - tmax), "hi"
+        return 0.0, None
+
+    def wn_objective_and_grad_reparam_y(
+        self,
+        y,
+        Qmat,
+        k,
+        dep_penalty_weight=0.0,
+    ):
+        """
+        WN-only objective/grad in reduced coordinates y = t_{i != k}.
+
+        Full map:
+            t = t(y), with t_k = B - sum(y)
+
+        Gradient mapping:
+            dF/dy_i = dF/dt_i - dF/dt_k
+
+        Optional dependent-bound penalty:
+            P = w * v(t_k)^2, where v is the (positive) bound violation magnitude.
+        """
+        y = np.asarray(y, dtype=float)
+        idx_free = self._reparam_split_indices(k)
+
+        # Build full t and evaluate base objective/gradient in t-space
+        t = self.t_from_free_y(y, k)
+        F, gradF_t = self.wn_objective_and_grad(t, Qmat)
+        gradF_t = np.asarray(gradF_t, dtype=float)
+
+        # Map gradient to y
+        gk = float(gradF_t[k])
+        grad_y = gradF_t[idx_free] - gk  # broadcast scalar gk
+
+        # Optional penalty if dependent pulsar violates bounds
+        if dep_penalty_weight and dep_penalty_weight > 0.0:
+            v, side = self._dependent_bound_violation(t, k)
+            if v > 0.0:
+                w = float(dep_penalty_weight)
+                F = float(F + w * (v ** 2))
+
+                # dv/dt_k is:
+                #   lo: v = tmin - t_k  => dv/dt_k = -1
+                #   hi: v = t_k - tmax  => dv/dt_k = +1
+                dv_dtk = -1.0 if side == "lo" else +1.0
+
+                # dP/dt_k = 2 w v dv/dt_k
+                dP_dtk = 2.0 * w * v * dv_dtk
+
+                # Since t_k = B - sum(y), dt_k/dy_i = -1 for all i!=k
+                # so dP/dy_i = dP/dt_k * dt_k/dy_i = - dP/dt_k
+                grad_y = grad_y - dP_dtk
+
+        return float(F), np.asarray(grad_y, dtype=float)
+
+    def maximize_snr_reparam_lbfgsb(
+        self,
+        Qmat,
+        t0=None,
+        k=None,
+        dep_penalty_weight=1e6,
+        maxiter=500,
+        gtol=1e-6,
+        verbose=False,
+        return_history=False,
+    ):
+        """
+        Maximize WN-only objective with equality eliminated by choosing a
+        dependent pulsar index k.
+
+        Uses scipy.optimize.minimize with L-BFGS-B on y = t_{i!=k}.
+
+        The equality sum(t)=B is enforced exactly via the reparam.
+        Dependent bound feasibility t_k in [tmin, tmax_k] is enforced via
+        a smooth quadratic penalty (weight dep_penalty_weight).
+        """
+        N = len(self.pta.psrlist)
+        B = float(self.t_int_maxtot)
+
+        # pick k if not given
+        if k is None:
+            # help the heuristic by using a feasible reference point
+            if t0 is None:
+                t_ref = np.full(N, B / N, dtype=float)
+            else:
+                t_ref = np.asarray(t0, dtype=float)
+            t_ref = self.project_to_budget_equality(t_ref)
+            k = self.dependent_pulsar_for_equality_reparam(Qmat, t_ref=t_ref)
+        if verbose:
+            print("Dependent index k:", k, "pulsar:", self.pta.psrlist[k].name)
+        idx_free = self._reparam_split_indices(k)
+
+        # initial feasible-ish t, then y0 = drop(k)
+        if t0 is None:
+            t0 = np.full(N, B / N, dtype=float)
+        t0 = self.project_to_budget_equality(t0)
+        y0 = self.free_y_from_t(t0, k)
+
+        bounds = self.reparam_free_bounds(k)
+
+        # optional callback history
+        hist = [] if return_history else None
+
+        def fun_and_jac(y):
+            F, grad_y = self.wn_objective_and_grad_reparam_y(
+                y, Qmat, k, dep_penalty_weight=dep_penalty_weight
+            )
+            # scipy minimizes; we want maximize => minimize -F
+            return -F, -grad_y
+
+        def callback(y):
+            if not return_history:
+                return
+            t = self.t_from_free_y(y, k)
+            F, grad_y = self.wn_objective_and_grad_reparam_y(
+                y, Qmat, k, dep_penalty_weight=dep_penalty_weight
+            )
+            v, side = self._dependent_bound_violation(t, k)
+            hist.append({
+                "y": np.asarray(y, float).copy(),
+                "t": np.asarray(t, float).copy(),
+                "F": float(F),
+                "dep_violation": float(v),
+                "dep_violation_side": side,
+                "gnorm_inf_y": float(np.max(np.abs(grad_y))),
+            })
+
+        res = minimize(
+            fun=lambda y: fun_and_jac(y)[0],
+            x0=y0,
+            jac=lambda y: fun_and_jac(y)[1],
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={
+                "maxiter": int(maxiter),
+                "gtol": float(gtol),
+                "disp": bool(verbose),
+            },
+            callback=callback if return_history else None,
+        )
+
+        y_star = np.asarray(res.x, dtype=float)
+        t_star = self.t_from_free_y(y_star, k)
+
+        # final safety: if dependent violated slightly, you’ll see it in diagnostics
+        # (don’t silently clip here; clipping breaks equality).
+        F_star, _ = self.wn_objective_and_grad(t_star, Qmat)
+
+        info = {
+            "success": bool(res.success),
+            "status": int(res.status),
+            "message": str(res.message),
+            "n_iter": int(getattr(res, "nit", -1)),
+            "n_eval": int(getattr(res, "nfev", -1)),
+            "k_dependent": int(k),
+            "t": t_star,
+            "F": float(F_star),
+            "history": hist,
+            "raw_result": res,
+        }
+        return t_star, float(F_star), info
+    
+    def wn_kkt_report(self, Qmat, t, eps_act=1e-6):
+        """
+        Return a dict of metric for white noise only
+        solution stationarity
+        """
+        t = np.asarray(t, float)
+        F, gradF = ot.wn_objective_and_grad(t, Qmat)
+        tmin = float(ot.t_int_min)
+        tmax = np.asarray(ot.t_int_max, float)
+        at_lo = t <= (tmin + eps_act)
+        at_hi = t >= (tmax - eps_act)
+        free  = ~(at_lo | at_hi)
+
+        # lambda estimate: mean grad over free set
+        lam = float(np.mean(gradF[free])) if np.any(free) else float(np.mean(gradF))
+
+        # KKT gaps (should be ~0 or correct-signed)
+        gap_free = np.zeros_like(t)
+        gap_lo   = np.zeros_like(t)
+        gap_hi   = np.zeros_like(t)
+        gap_free[free] = gradF[free] - lam
+        gap_lo[at_lo]  = gradF[at_lo] - lam          # should be <= 0 at lo-active
+        gap_hi[at_hi]  = lam - gradF[at_hi]          # should be <= 0 at hi-active
+
+        return {
+            "F": F,
+            "sum": float(np.sum(t)),
+            "lam": lam,
+            "t": t,
+            "gradF": gradF,
+            "free": free,
+            "at_lo": at_lo,
+            "at_hi": at_hi,
+            "gap_free_inf": float(np.max(np.abs(gap_free[free])) if np.any(free) else 0.0),
+            "gap_lo_maxpos": float(np.max(np.maximum(0.0, gap_lo[at_lo])) if np.any(at_lo) else 0.0),
+            "gap_hi_maxpos": float(np.max(np.maximum(0.0, gap_hi[at_hi])) if np.any(at_hi) else 0.0),
+            "idx_lo": np.where(at_lo)[0],
+            "idx_hi": np.where(at_hi)[0],
+        }
