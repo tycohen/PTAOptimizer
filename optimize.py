@@ -1297,48 +1297,39 @@ class OptimizeTime(object):
         k,
         dep_penalty_weight=0.0,
     ):
-        """
-        WN-only objective/grad in reduced coordinates y = t_{i != k}.
-
-        Full map:
-            t = t(y), with t_k = B - sum(y)
-
-        Gradient mapping:
-            dF/dy_i = dF/dt_i - dF/dt_k
-
-        Optional dependent-bound penalty:
-            P = w * v(t_k)^2, where v is the (positive) bound violation magnitude.
-        """
         y = np.asarray(y, dtype=float)
         idx_free = self._reparam_split_indices(k)
 
-        # Build full t and evaluate base objective/gradient in t-space
+        # Build full t
         t = self.t_from_free_y(y, k)
-        F, gradF_t = self.wn_objective_and_grad(t, Qmat)
-        gradF_t = np.asarray(gradF_t, dtype=float)
 
-        # Map gradient to y
-        gk = float(gradF_t[k])
-        grad_y = gradF_t[idx_free] - gk  # broadcast scalar gk
-
-        # Optional penalty if dependent pulsar violates bounds
+        # ---- EARLY GUARD: if dependent violates bounds, DO NOT evaluate base objective ----
         if dep_penalty_weight and dep_penalty_weight > 0.0:
             v, side = self._dependent_bound_violation(t, k)
             if v > 0.0:
                 w = float(dep_penalty_weight)
-                F = float(F + w * (v ** 2))
 
-                # dv/dt_k is:
-                #   lo: v = tmin - t_k  => dv/dt_k = -1
-                #   hi: v = t_k - tmax  => dv/dt_k = +1
+                # Penalty objective only
+                F_pen = -w * (v ** 2)
+
+                # dv/dt_k: lo => -1, hi => +1
                 dv_dtk = -1.0 if side == "lo" else +1.0
-
-                # dP/dt_k = 2 w v dv/dt_k
                 dP_dtk = 2.0 * w * v * dv_dtk
 
-                # Since t_k = B - sum(y), dt_k/dy_i = -1 for all i!=k
-                # so dP/dy_i = dP/dt_k * dt_k/dy_i = - dP/dt_k
-                grad_y = grad_y - dP_dtk
+                # Early-guard returns only (-P)
+                # so grad is +dP/dt_k for every y_i
+                grad_y = np.full(len(idx_free), +dP_dtk, dtype=float)
+
+                # Return penalty-only objective/grad (feasibility restoration step)
+                return float(F_pen), grad_y
+
+        # ---- If dependent is feasible, evaluate real objective/grad ----
+        F, gradF_t = self.wn_objective_and_grad(t, Qmat)
+        gradF_t = np.asarray(gradF_t, dtype=float)
+
+        # Map gradient: dF/dy_i = dF/dt_i - dF/dt_k
+        gk = float(gradF_t[k])
+        grad_y = gradF_t[idx_free] - gk
 
         return float(F), np.asarray(grad_y, dtype=float)
 
@@ -1433,8 +1424,10 @@ class OptimizeTime(object):
 
         # final safety: if dependent violated slightly, you’ll see it in diagnostics
         # (don’t silently clip here; clipping breaks equality).
-        F_star, _ = self.wn_objective_and_grad(t_star, Qmat)
-
+        y_star = np.asarray(res.x, dtype=float)
+        F_star, _ = self.wn_objective_and_grad_reparam_y(
+            y_star, Qmat, k, dep_penalty_weight=dep_penalty_weight
+)
         info = {
             "success": bool(res.success),
             "status": int(res.status),
@@ -1455,9 +1448,9 @@ class OptimizeTime(object):
         solution stationarity
         """
         t = np.asarray(t, float)
-        F, gradF = ot.wn_objective_and_grad(t, Qmat)
-        tmin = float(ot.t_int_min)
-        tmax = np.asarray(ot.t_int_max, float)
+        F, gradF = self.wn_objective_and_grad(t, Qmat)
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, float)
         at_lo = t <= (tmin + eps_act)
         at_hi = t >= (tmax - eps_act)
         free  = ~(at_lo | at_hi)
