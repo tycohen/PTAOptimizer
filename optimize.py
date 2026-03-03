@@ -1,13 +1,14 @@
 from os import path
 from warnings import warn
 from scipy.interpolate import PchipInterpolator
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds, LinearConstraint
 import numpy as np
 import cma
 import PTAOptimizer.observatory_ops as oops
 from calc_timing import calc_timing
 import gravitational_waves as gw
 import copy
+import datetime
 
 class OptimizeFrequency(object):
     """
@@ -1296,17 +1297,19 @@ class OptimizeTime(object):
         Qmat,
         k,
         dep_penalty_weight=0.0,
+        return_debug=False
     ):
         y = np.asarray(y, dtype=float)
         idx_free = self._reparam_split_indices(k)
 
         # Build full t
         t = self.t_from_free_y(y, k)
-
+        used_penalty = False
         # ---- EARLY GUARD: if dependent violates bounds, DO NOT evaluate base objective ----
         if dep_penalty_weight and dep_penalty_weight > 0.0:
             v, side = self._dependent_bound_violation(t, k)
             if v > 0.0:
+                used_penalty = True
                 w = float(dep_penalty_weight)
 
                 # Penalty objective only
@@ -1321,7 +1324,13 @@ class OptimizeTime(object):
                 grad_y = np.full(len(idx_free), +dP_dtk, dtype=float)
 
                 # Return penalty-only objective/grad (feasibility restoration step)
-                return float(F_pen), grad_y
+                if return_debug:
+                    return (float(F_pen),
+                            grad_y,
+                            {"used_penalty": True,
+                             "v": float(v),
+                             "side": side})
+                return float(F_pen), np.asarray(grad_y, dtype=float)
 
         # ---- If dependent is feasible, evaluate real objective/grad ----
         F, gradF_t = self.wn_objective_and_grad(t, Qmat)
@@ -1330,7 +1339,13 @@ class OptimizeTime(object):
         # Map gradient: dF/dy_i = dF/dt_i - dF/dt_k
         gk = float(gradF_t[k])
         grad_y = gradF_t[idx_free] - gk
-
+        if return_debug:
+            v, side = self._dependent_bound_violation(t, k)
+            return (float(F),
+                    np.asarray(grad_y, dtype=float),
+                    {"used_penalty": False,
+                     "v": float(v),
+                     "side": side})
         return float(F), np.asarray(grad_y, dtype=float)
 
     def maximize_snr_reparam_lbfgsb(
@@ -1343,6 +1358,7 @@ class OptimizeTime(object):
         gtol=1e-6,
         verbose=False,
         return_history=False,
+        logpath="."
     ):
         """
         Maximize WN-only objective with equality eliminated by choosing a
@@ -1378,37 +1394,45 @@ class OptimizeTime(object):
 
         bounds = self.reparam_free_bounds(k)
 
-        # optional callback history
-        hist = [] if return_history else None
+        eval_log = []
+        last = {"y": None, "F": None, "g": None, "t": None, "dbg": None}
 
-        def fun_and_jac(y):
-            F, grad_y = self.wn_objective_and_grad_reparam_y(
-                y, Qmat, k, dep_penalty_weight=dep_penalty_weight
+        def eval_at(y):
+            y = np.asarray(y, float)
+            if last["y"] is not None and np.array_equal(y, last["y"]):
+                return last["F"], last["g"], last["t"], last["dbg"]
+
+            F, g, dbg = self.wn_objective_and_grad_reparam_y(
+                y, Qmat, k,
+                dep_penalty_weight=dep_penalty_weight,
+                return_debug=True,          # <- you add this flag
             )
-            # scipy minimizes; we want maximize => minimize -F
-            return -F, -grad_y
-
-        def callback(y):
-            if not return_history:
-                return
             t = self.t_from_free_y(y, k)
-            F, grad_y = self.wn_objective_and_grad_reparam_y(
-                y, Qmat, k, dep_penalty_weight=dep_penalty_weight
-            )
-            v, side = self._dependent_bound_violation(t, k)
-            hist.append({
-                "y": np.asarray(y, float).copy(),
-                "t": np.asarray(t, float).copy(),
-                "F": float(F),
-                "dep_violation": float(v),
-                "dep_violation_side": side,
-                "gnorm_inf_y": float(np.max(np.abs(grad_y))),
-            })
 
+            last.update({"y": y.copy(), "F": float(F), "g": np.asarray(g, float), "t": t, "dbg": dbg})
+
+            eval_log.append({
+                "F": float(F),
+                "gnorm_inf_y": float(np.max(np.abs(g))),
+                "used_penalty": bool(dbg["used_penalty"]),
+                "dep_violation": float(dbg["v"]),
+                "dep_violation_side": dbg["side"],
+                "t_dep": float(t[k]),
+            })
+            return last["F"], last["g"], last["t"], last["dbg"]
+
+        def fun(y):
+            F, g, t, dbg = eval_at(y)
+            return -F
+
+        def jac(y):
+            F, g, t, dbg = eval_at(y)
+            return -g
+        
         res = minimize(
-            fun=lambda y: fun_and_jac(y)[0],
+            fun=fun,
             x0=y0,
-            jac=lambda y: fun_and_jac(y)[1],
+            jac=jac,
             method="L-BFGS-B",
             bounds=bounds,
             options={
@@ -1416,18 +1440,13 @@ class OptimizeTime(object):
                 "gtol": float(gtol),
                 "disp": bool(verbose),
             },
-            callback=callback if return_history else None,
+            callback=None
         )
-
-        y_star = np.asarray(res.x, dtype=float)
-        t_star = self.t_from_free_y(y_star, k)
 
         # final safety: if dependent violated slightly, you’ll see it in diagnostics
         # (don’t silently clip here; clipping breaks equality).
         y_star = np.asarray(res.x, dtype=float)
-        F_star, _ = self.wn_objective_and_grad_reparam_y(
-            y_star, Qmat, k, dep_penalty_weight=dep_penalty_weight
-)
+        F_star, g_star, t_star, dbg_star = eval_at(y_star)
         info = {
             "success": bool(res.success),
             "status": int(res.status),
@@ -1437,9 +1456,29 @@ class OptimizeTime(object):
             "k_dependent": int(k),
             "t": t_star,
             "F": float(F_star),
-            "history": hist,
             "raw_result": res,
         }
+        info["eval_log"] = eval_log
+        info["eval_log_summary"] = {
+            "n_eval": len(eval_log),
+            "n_penalty": int(sum(e["used_penalty"] for e in eval_log)),
+            "max_dep_violation": float(max(e["dep_violation"]
+                                           for e in eval_log)) if eval_log else 0.0,
+            "min_t_dep": float(min(e["t_dep"]
+                                   for e in eval_log)) if eval_log else np.nan,
+            "max_t_dep": float(max(e["t_dep"]
+                                   for e in eval_log)) if eval_log else np.nan,
+        }
+
+        # now = datetime.datetime.now()
+        # nowstr = "{}-{}-{}_{}-{}-{}".format(now.year,
+        #                                     now.month,
+        #                                     now.day,
+        #                                     now.hour,
+        #                                     now.minute,
+        #                                     now.second)
+        # np.save(path.join(logpath, "lbfgsb_{}.log".format(nowstr)),
+        #         np.array(log))
         return t_star, float(F_star), info
     
     def wn_kkt_report(self, Qmat, t, eps_act=1e-6):
@@ -1481,3 +1520,204 @@ class OptimizeTime(object):
             "idx_lo": np.where(at_lo)[0],
             "idx_hi": np.where(at_hi)[0],
         }
+
+    def _budget_linear_constraint(self):
+        """
+        Linear equality constraint: sum(t) = B
+        """
+        N = len(self.pta.psrlist)
+        B = float(self.t_int_maxtot)
+        A = np.ones((1, N), dtype=float)
+        return LinearConstraint(A, lb=np.array([B]), ub=np.array([B]))
+
+
+    def _time_bounds(self):
+        """
+        Box bounds: tmin <= t_i <= tmax_i
+        """
+        N = len(self.pta.psrlist)
+        lo = np.full(N, float(self.t_int_min), dtype=float)
+        hi = np.asarray(self.t_int_max, dtype=float).reshape(N)
+        return Bounds(lo, hi, keep_feasible=True)
+
+    def _make_cached_fun_jac(self, Qmat, bound_penalty=1e12):
+        cache = {"x": None, "f": None, "g": None}
+
+        lo = float(self.t_int_min)
+        hi = np.asarray(self.t_int_max, dtype=float).reshape(len(self.pta.psrlist))
+
+        def eval_fg(x):
+            x = np.asarray(x, dtype=float)
+
+            if cache["x"] is not None and np.array_equal(x, cache["x"]):
+                return cache["f"], cache["g"]
+
+            # ---- DOMAIN GUARD: if out of bounds, return smooth quadratic penalty ----
+            # v_i = amount below lo or above hi (>=0)
+            v_lo = np.maximum(0.0, lo - x)
+            v_hi = np.maximum(0.0, x - hi)
+            v = v_lo + v_hi
+            if np.any(v > 0.0):
+                # minimize f, so positive penalty
+                f = float(bound_penalty * np.dot(v, v))
+
+                # gradient of penalty: 2*w*v * dv/dx
+                # dv/dx = -1 where x<lo, +1 where x>hi, 0 otherwise
+                dv_dx = np.zeros_like(x)
+                dv_dx[x < lo] = -1.0
+                dv_dx[x > hi] = +1.0
+                g = 2.0 * float(bound_penalty) * v * dv_dx
+
+                cache["x"] = x.copy()
+                cache["f"] = f
+                cache["g"] = g
+                return f, g
+
+            # ---- SAFE: in-bounds, evaluate real objective/grad ----
+            F, gradF = self.wn_objective_and_grad(x, Qmat)
+            f = -float(F)
+            g = -np.asarray(gradF, dtype=float)
+
+            cache["x"] = x.copy()
+            cache["f"] = f
+            cache["g"] = g
+            return f, g
+
+        def fun(x):
+            f, _ = eval_fg(x)
+            return f
+
+        def jac(x):
+            _, g = eval_fg(x)
+            return g
+
+        return fun, jac
+
+
+    def maximize_snr_trust_constr(
+        self,
+        Qmat,
+        t0=None,
+        maxiter=500,
+        gtol=1e-6,
+        xtol=1e-10,
+        barrier_tol=1e-10,
+        verbose=0,
+        return_history=False,
+    ):
+        """
+        Maximize WN-only objective F(t) subject to:
+            sum(t) = B
+            tmin <= t <= tmax
+
+        Uses scipy.optimize.minimize(method="trust-constr") on f(t) = -F(t).
+
+        Parameters
+        ----------
+        Qmat : ndarray (N,N)
+        t0 : optional initial guess (N,)
+            If provided, will be projected to the feasible set {bounds + equality}.
+        maxiter, gtol, xtol, barrier_tol : trust-constr tolerances
+        verbose : int
+            0 quiet, 1 basic, 2+ more output (scipy style)
+        return_history : bool
+            If True, log t, F, ||proj grad||_inf (approx) each callback.
+
+        Returns
+        -------
+        t_star : ndarray (N,)
+        F_star : float
+        info : dict
+        """
+        N = len(self.pta.psrlist)
+        B = float(self.t_int_maxtot)
+
+        # --- initial point ---
+        if t0 is None:
+            t0 = np.full(N, B / N, dtype=float)
+
+        # Ensure feasibility (bounds + equality) using your existing projector
+        t0 = self.project_to_budget_equality(t0)
+
+        # --- constraints + bounds ---
+        lc = self._budget_linear_constraint()
+        bnds = self._time_bounds()
+
+        # --- objective + jac (cached) ---
+        fun, jac = self._make_cached_fun_jac(Qmat)
+
+        hist = [] if return_history else None
+
+        def callback(x, state=None):
+            if not return_history:
+                return
+            x = np.asarray(x, dtype=float)
+            # Evaluate true (max) objective for logging
+            F, gradF = self.wn_objective_and_grad(x, Qmat)
+
+            # Approx “projected gradient” infinity norm for equality manifold:
+            # subtract mean to enforce sum-direction removal, then zero infeasible bound pushes.
+            # (This is a *diagnostic*, not used by trust-constr.)
+            g = np.asarray(gradF, float).copy()
+            lam = float(np.mean(g))
+            g = g - lam
+
+            # bound push feasibility diagnostic
+            lo = float(self.t_int_min)
+            hi = np.asarray(self.t_int_max, float).reshape(N)
+            at_lo = x <= (lo + 1e-12)
+            at_hi = x >= (hi - 1e-12)
+            g[at_lo & (g < 0.0)] = 0.0
+            g[at_hi & (g > 0.0)] = 0.0
+
+            hist.append({
+                "t": x.copy(),
+                "F": float(F),
+                "sum": float(np.sum(x)),
+                "sum_err": float(np.sum(x) - B),
+                "gnorm_inf_proj_diag": float(np.max(np.abs(g))),
+                "at_lo": at_lo,
+                "at_hi": at_hi
+            })
+
+        res = minimize(
+            fun=fun,
+            x0=t0,
+            jac=jac,
+            method="trust-constr",
+            bounds=bnds,
+            constraints=[lc],
+            options={
+                "initial_tr_radius": 1.0,          # try 1e3 or 1e4 too
+                "initial_constr_penalty": 1.0, #  try 1e2–1e4 if equality is stiff
+                # "factorization_method": "svd",    # robustness (slower)
+                "maxiter": int(maxiter),
+                "gtol": float(gtol),
+                "xtol": float(xtol),
+                "barrier_tol": float(barrier_tol),
+                "verbose": int(verbose),
+            },
+            callback=callback if return_history else None,
+        )
+
+        t_star = np.asarray(res.x, dtype=float)
+
+        # trust-constr should satisfy equality tightly, but keep the check explicit
+        # (do NOT silently project here; that would invalidate res.success meaning)
+        F_star, _ = self.wn_objective_and_grad(t_star, Qmat)
+
+        info = {
+            "success": bool(res.success),
+            "status": int(res.status),
+            "message": str(res.message),
+            "n_iter": int(getattr(res, "nit", -1)),
+            "n_eval": int(getattr(res, "nfev", -1)),
+            "t": t_star,
+            "F": float(F_star),
+            "sum": float(np.sum(t_star)),
+            "sum_err": float(np.sum(t_star) - B),
+            "history": hist,
+            "raw_result": res,
+        }
+        return t_star, float(F_star), info
+    
