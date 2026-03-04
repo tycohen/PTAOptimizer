@@ -1540,11 +1540,18 @@ class OptimizeTime(object):
         hi = np.asarray(self.t_int_max, dtype=float).reshape(N)
         return Bounds(lo, hi, keep_feasible=True)
 
-    def _make_cached_fun_jac(self, Qmat, bound_penalty=1e12):
+    def _make_cached_fun_jac(self, Qmat, bound_penalty=1e12, obj_scale=1.0):
+        """
+        Return cached (fun, jac) for trust-constr on f(t) = -F(t)/obj_scale.
+        """
         cache = {"x": None, "f": None, "g": None}
 
         lo = float(self.t_int_min)
         hi = np.asarray(self.t_int_max, dtype=float).reshape(len(self.pta.psrlist))
+
+        obj_scale = float(obj_scale)
+        if not np.isfinite(obj_scale) or obj_scale <= 0.0:
+            raise ValueError(f"obj_scale must be positive finite, got {obj_scale}")
 
         def eval_fg(x):
             x = np.asarray(x, dtype=float)
@@ -1552,21 +1559,21 @@ class OptimizeTime(object):
             if cache["x"] is not None and np.array_equal(x, cache["x"]):
                 return cache["f"], cache["g"]
 
-            # ---- DOMAIN GUARD: if out of bounds, return smooth quadratic penalty ----
+            # DOMAIN GUARD: if out of bounds, return smooth quadratic penalty
             # v_i = amount below lo or above hi (>=0)
             v_lo = np.maximum(0.0, lo - x)
             v_hi = np.maximum(0.0, x - hi)
             v = v_lo + v_hi
             if np.any(v > 0.0):
                 # minimize f, so positive penalty
-                f = float(bound_penalty * np.dot(v, v))
+                f = float(bound_penalty * np.dot(v, v)) / obj_scale
 
                 # gradient of penalty: 2*w*v * dv/dx
                 # dv/dx = -1 where x<lo, +1 where x>hi, 0 otherwise
                 dv_dx = np.zeros_like(x)
                 dv_dx[x < lo] = -1.0
                 dv_dx[x > hi] = +1.0
-                g = 2.0 * float(bound_penalty) * v * dv_dx
+                g = (2.0 * float(bound_penalty) * v * dv_dx)
 
                 cache["x"] = x.copy()
                 cache["f"] = f
@@ -1575,8 +1582,8 @@ class OptimizeTime(object):
 
             # ---- SAFE: in-bounds, evaluate real objective/grad ----
             F, gradF = self.wn_objective_and_grad(x, Qmat)
-            f = -float(F)
-            g = -np.asarray(gradF, dtype=float)
+            f = -float(F) / obj_scale
+            g = -np.asarray(gradF, dtype=float) / obj_scale
 
             cache["x"] = x.copy()
             cache["f"] = f
@@ -1599,9 +1606,12 @@ class OptimizeTime(object):
         Qmat,
         t0=None,
         maxiter=500,
+        init_trustrad=1.0,
+        init_constrpenalty=1.0,
         gtol=1e-6,
         xtol=1e-10,
         barrier_tol=1e-10,
+        obj_scale="equal",
         verbose=0,
         return_history=False,
     ):
@@ -1618,6 +1628,11 @@ class OptimizeTime(object):
         t0 : optional initial guess (N,)
             If provided, will be projected to the feasible set {bounds + equality}.
         maxiter, gtol, xtol, barrier_tol : trust-constr tolerances
+        obj_scale : str or float
+            Constant factor by which to scale the objective visible to the
+            optimizer. If set to 'equal', obj_scale is F(ti) where ti is a 
+            vector of equal times that sum to the budget. If set to 'init' and
+            t0 is also set, obj_scale = F(t0), otherwise defaults to 'equal'.
         verbose : int
             0 quiet, 1 basic, 2+ more output (scipy style)
         return_history : bool
@@ -1638,13 +1653,23 @@ class OptimizeTime(object):
 
         # Ensure feasibility (bounds + equality) using your existing projector
         t0 = self.project_to_budget_equality(t0)
-
+        if obj_scale == "equal":
+            teq = self.project_to_budget_equality(np.full(N, B / N,
+                                                          dtype=float))
+            F0 = self.wn_objective_only(teq, Qmat)
+            obj_scale = max(1.0, abs(float(F0)))
+        if obj_scale == "init":
+            F0 = self.wn_objective_only(t0, Qmat)
+            obj_scale = max(1.0, abs(float(F0)))
+        init_constrpenalty_eff = float(init_constrpenalty) / float(obj_scale)
         # --- constraints + bounds ---
         lc = self._budget_linear_constraint()
         bnds = self._time_bounds()
 
         # --- objective + jac (cached) ---
-        fun, jac = self._make_cached_fun_jac(Qmat)
+        fun, jac = self._make_cached_fun_jac(Qmat,
+                                             bound_penalty=1e12,
+                                             obj_scale=obj_scale)
 
         hist = [] if return_history else None
 
@@ -1688,8 +1713,8 @@ class OptimizeTime(object):
             bounds=bnds,
             constraints=[lc],
             options={
-                "initial_tr_radius": 1.0,          # try 1e3 or 1e4 too
-                "initial_constr_penalty": 1.0, #  try 1e2–1e4 if equality is stiff
+                "initial_tr_radius": init_trustrad,
+                "initial_constr_penalty": init_constrpenalty_eff,
                 # "factorization_method": "svd",    # robustness (slower)
                 "maxiter": int(maxiter),
                 "gtol": float(gtol),
@@ -1718,6 +1743,12 @@ class OptimizeTime(object):
             "sum_err": float(np.sum(t_star) - B),
             "history": hist,
             "raw_result": res,
+            "obj_scale": float(obj_scale),
+            "scaled_fun": float(res.fun),
+            "optimality": float(getattr(res, "optimality", np.nan)),
+            "constr_violation": float(getattr(res, "constr_violation", np.nan)),
+            "tr_radius": float(getattr(res, "tr_radius", np.nan)),
+            "constr_penalty": float(getattr(res, "constr_penalty", np.nan))
         }
         return t_star, float(F_star), info
     
