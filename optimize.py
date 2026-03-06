@@ -408,6 +408,9 @@ class OptimizeTime(object):
         """
         Get optimum integration time vector from lookup table and grid of S/N
         """
+        warn("It is unlikely for the grid resolution to be sufficient to "
+             "determine the true optimum if the optimum lies on the budget "
+             "boundary.")
         best_idx = self._grid_search_best_indices()
         best_tint = np.array([p.t_int[self.tint_grid_names[i]]
                               for p, i in zip(self.pta.psrlist, best_idx)])
