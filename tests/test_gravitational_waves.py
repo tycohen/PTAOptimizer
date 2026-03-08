@@ -150,10 +150,12 @@ class test_rednoise_psd2charstrain(unittest.TestCase):
 @ptzd.parameterized_class(("pulsar_sigma_tots",),
                           [((.1, 10., 0.1, 0.01),),
                            ((100, 20, 1e-3, 10),)])
-class test_quadratic_form_snr_white_noise_only(unittest.TestCase):
+class test_quadratic_form_snr(unittest.TestCase):
     """
-    Test gravitational_waves.build_W_matrix and 
-    gravitational_waves.build_Q_matrix
+    Test gravitational_waves.build_W_matrix, 
+    gravitational_waves.build_Q_matrix,
+    gravitational_waves.build_tildeQ_blocks,
+    gravitational_waves.gwb_snr_quad
     """
     def setUp(self):
         # initialize pulsars with empty sigma dicts to be filled by ptzd
@@ -193,7 +195,7 @@ class test_quadratic_form_snr_white_noise_only(unittest.TestCase):
                                            gwb_spindex=-2/3,
                                            return_sencurve=False)
 
-    def test_quadratic_form_snr_consistency_with_hasasia(self):
+    def test_white_noise_only_snr_from_build_Q_matrix_consistent_with_hasasia(self):
         """
         Test that p^T * Q * p gives same S/N as
         hasasia.GWBSensitivityCurve.SNR, where p[i] = sigma[i] ** -2
@@ -223,6 +225,45 @@ class test_quadratic_form_snr_white_noise_only(unittest.TestCase):
         for p in psrs:
             sp = hsen.Spectrum(p, freqs=self.psrdict["freqs"])
             # No need for NcalInv approx, NcalInv is exact for WN-only
+            sp.NcalInv
+            hs_spectra.append(sp)
+        scurve = hsen.GWBSensitivityCurve(hs_spectra)
+        Sh = hsen.S_h(2.4e-15,
+                      -2/3,
+                      self.psrdict["freqs"])
+        snr_hasasia = scurve.SNR(Sh)
+        np.testing.assert_allclose(snr_quadratic,
+                                   snr_hasasia,
+                                   rtol=1e-8)
+
+    def test_white_plus_red_noise_snr_from_build_tildeQ_blocks_consistent_with_hasasia(self):
+        """
+        Test that :math: `\rho^2 = \sum_k a(f_k)^T {\bf Q}(f_k) a(f_k)`
+        gives same S/N as hasasia.GWBSensitivityCurve.SNR, 
+        where a_fk[i] = 1 / psrdict["spectra"][i]
+        """
+        Q_fk = gw.build_tildeQ_blocks(self.psrdict)
+        a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
+        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+
+        sigmas_sec = np.array([p.sigmas["test_config"]["sigma_tot"] / 1e6
+                               for p in self.pta.psrlist]) 
+        names = [p.name for p in self.psrdict["psrs"].values()]
+        phis = np.array([p.phi for p in self.psrdict["psrs"].values()])
+        thetas = np.array([p.theta for p in self.psrdict["psrs"].values()])
+        psrs = hsim.sim_pta(psr_names=names,
+                            timespan=self.timespan_yr,
+                            cad=self.cadence,
+                            sigma=sigmas_sec,
+                            phi=phis,
+                            theta=thetas,
+                            A_gwb=2.4e-15,
+                            alpha_gwb=-2/3,
+                            freqs=self.psrdict["freqs"])
+        hs_spectra = []
+        for p in psrs:
+            sp = hsen.Spectrum(p, freqs=self.psrdict["freqs"])
+            # a_fk above doesn't contain NcalInv approx, so not needed here
             sp.NcalInv
             hs_spectra.append(sp)
         scurve = hsen.GWBSensitivityCurve(hs_spectra)
@@ -368,3 +409,123 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         np.testing.assert_allclose(gwb_snr,
                                    snr_quadratic,
                                    rtol=1e-8)
+
+class test_gwb_snr_quad_white_plus_red_noise(unittest.TestCase):
+    """
+    Test gravitational_wave.gwb_snr_quad when the pulsar PSD contains
+    both white and red noise
+    """
+    def setUp(self):
+        self.n_lut_samp = 20
+        # realistic pulsar LUTs w/ sigma \propto 1 / sqrt(t)
+        tint_psr1 = np.logspace(np.log10(60.), 6.086, self.n_lut_samp)
+        self.pulsar1 = Pulsar(name="testpulsar1", #J1713+0747
+                        dec=7.79,
+                        ra=258.46,
+                        t_int={"testconfig_tint{}".format(i) : t
+                               for i, t in enumerate(tint_psr1)},
+                        sigmas={"testconfig_tint{}".format(i):
+                                {"sigma_tot": 2.125 / np.sqrt(t) + 0.005}
+                                for i, t in enumerate(tint_psr1)})
+        tint_psr2 = np.logspace(np.log10(60.), 5.984, self.n_lut_samp)
+        self.pulsar2 = Pulsar(name="testpulsar2", #J1643-1224
+                        dec=-12.42,
+                        ra=250.91,
+                        t_int={"testconfig_tint{}".format(i) : t
+                               for i, t in enumerate(tint_psr2)},
+                        sigmas={"testconfig_tint{}".format(i):
+                                {"sigma_tot": 2.651 / np.sqrt(t) + 0.054}
+                                for i, t in enumerate(tint_psr2)})
+        tint_psr3 = np.logspace(np.log10(60.), 6.012, self.n_lut_samp)
+        self.pulsar3 = Pulsar(name="testpulsar3", #J2145-0750
+                        dec=-7.84,
+                        ra=326.46,
+                        t_int={"testconfig_tint{}".format(i) : t
+                               for i, t in enumerate(tint_psr3)},
+                        sigmas={"testconfig_tint{}".format(i):
+                                {"sigma_tot": 14.368 / np.sqrt(t) + 0.004}
+                                for i, t in enumerate(tint_psr3)})
+        tint_psr4 = np.logspace(np.log10(60.), 6.079, self.n_lut_samp)
+        self.pulsar4 = Pulsar(name="testpulsar4", #J2017+0603
+                        dec=6.05,
+                        ra=304.35,
+                        t_int={"testconfig_tint{}".format(i) : t
+                               for i, t in enumerate(tint_psr4)},
+                        sigmas={"testconfig_tint{}".format(i):
+                                {"sigma_tot": 5.841 / np.sqrt(t) + 0.005}
+                                for i, t in enumerate(tint_psr4)})
+        tint_psr5 = np.logspace(np.log10(60.), 6.065, self.n_lut_samp)
+        self.pulsar5 = Pulsar(name="testpulsar5", #J1102+0249
+                        dec=2.824,
+                        ra=165.675,
+                        t_int={"testconfig_tint{}".format(i) : t
+                               for i, t in enumerate(tint_psr5)},
+                        sigmas={"testconfig_tint{}".format(i):
+                                {"sigma_tot": 21.897 / np.sqrt(t) + 0.013}
+                                for i, t in enumerate(tint_psr5)})
+        self.pta = PTA(psrlist=[self.pulsar1,
+                                self.pulsar2,
+                                self.pulsar3,
+                                self.pulsar4,
+                                self.pulsar5])
+        # values to use only when computing the GWB strain PSD S_h
+        self.snr_gwbamp = 2.4e-15
+        self.snr_gwbidx = -2/3
+
+    def test_gwb_snr_quad_matches_gwb_snr(self):
+        """
+        Test quadratic form in gravitational_waves.gwb_snr_quad
+        matches gravitational_waves.gwb_snr for pulsar PSDs containing
+        white and red noise
+        """
+        # just test the middle sigma value for now
+        lut_idx = self.n_lut_samp // 2
+        instrument = "testconfig_tint{}".format(lut_idx)
+        self.psrdict = gw.get_hasasia_psrs(self.pta,
+                                           instrument,
+                                           timespan_yr=15.,
+                                           cadence=12, n_freqs=400,
+                                           use_best_instr=False,
+                                           gwb_strainamp=self.snr_gwbamp,
+                                           gwb_spindex=self.snr_gwbidx)
+        # compute the value from gravitational_waves module
+        gwb_snr = gw.gwb_snr(self.psrdict)
+        # compute the value from quadratic form
+        Q_fk = gw.build_tildeQ_blocks(self.psrdict)
+        a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
+        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+        np.testing.assert_allclose(gwb_snr,
+                                   snr_quadratic,
+                                   rtol=1e-8)
+
+    def test_gwb_snr_quad_matches_gwb_snr_after_update_approx(self):
+        """
+        test gravitational_waves.gwb_snr_quad matches 
+        gravitational_waves.gwb_snr when the pulsar PSDs contain both
+        white and red noise after updating spectra with 
+        gravitational_waves.update_noise_spectra_approx
+        """
+        instr_init = "testconfig_tint0"
+        self.psrdict = gw.get_hasasia_psrs(self.pta,
+                                           instr_init,
+                                           timespan_yr=15.,
+                                           cadence=12, n_freqs=400,
+                                           use_best_instr=False,
+                                           # GWB doesnt contribute to pulsar PSD
+                                           gwb_strainamp=0.,
+                                           gwb_spindex=0.)
+        # update psrdict["spectra"] in place
+        instr_update = "testconfig_tint1"
+        self.psrdict["instruments"] = [instr_update] * len(self.pta.psrlist)
+        gw.update_noise_spectra_approx(self.psrdict, self.pta)
+        # compute the value from gravitational_waves module
+        gwb_snr = gw.gwb_snr(self.psrdict)
+        # compute the value from quadratic form
+        Q_fk = gw.build_tildeQ_blocks(self.psrdict)
+        a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
+        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+        np.testing.assert_allclose(gwb_snr,
+                                   snr_quadratic,
+                                   rtol=1e-8)
+
+                

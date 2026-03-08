@@ -197,7 +197,7 @@ def build_W_matrix(psrdict):
     .. math::
     {\bf W}_{IJ} =     
         \begin{cases}
-            \frac{1}{2}\frac{T_{IJ}}{T_{\rm obs}}\chi_{IJ}, & I \neq J\\
+            \frac{1}{2}\frac{T_{IJ}}{T_{\rm obs}}\chi_{IJ}^2, & I \neq J\\
             0, & I=J
         \end{cases}
     """
@@ -246,6 +246,47 @@ def build_Q_matrix(psrdict):
                         axis=0)
     W = build_W_matrix(psrdict)
     return 2 * T_obs * integral * W
+
+def build_tildeQ_blocks(psrdict):
+    """
+    Compute the sub-matrices of the block-diagonal, noise-independent 
+    \tilde{Q} matrix for computing the white noise + red noise
+    GWB S/N that can satisfy the quadratic form 
+    :math: `\rho^2 = \tilde{p}^T {\bf \tilde{Q}} \tilde{p}`
+
+    .. math::
+    {\bf Q}_{IJ}(f_k) =    
+    \begin{cases}
+    2T_{\mathrm{obs}} \, w_k S_h^2(f_k)\, {\bf W}, & I \neq J, \\
+    0, & I = J
+    \end{cases}
+
+    Returns a length N_GWfreqs array of N_pulsar x N_pulsar sub-matrices
+    """
+    N = len(psrdict["psrs"])
+    n_freqs = len(psrdict["freqs"])
+    freqdiff = np.diff(psrdict["freqs"])
+    df = freqdiff[0]
+    if not np.allclose(df, freqdiff):
+        raise ValueError("psrdict['freqs'] is not evenly spaced. "
+                         "build_tildeQ_matrix only valid for evenly spaced "
+                         "frequencies.")
+    trapz_freq_wts = df * np.concatenate([[0.5], np.ones(n_freqs - 2), [0.5]])
+    T_obs = hsen.get_Tspan(list(psrdict["psrs"].values()))
+    Sh = hsen.S_h(psrdict["gwb_strainamp"],
+                  psrdict["gwb_spindex"],
+                  psrdict["freqs"])
+    W = build_W_matrix(psrdict)
+    Q_fk = [2 * T_obs * w_k * (Sh_k ** 2) * W
+            for w_k, Sh_k in zip(trapz_freq_wts, Sh)]
+    return np.array(Q_fk)
+
+def gwb_snr_quad(Q_fk, a_fk):
+    """
+    Compute the GWB S/N from the quadratic form
+    :math: `\rho^2 = \sum_k a(f_k)^T {\bf Q}(f_k) a(f_k)`
+    """
+    return np.sum([ak @ (Qk @ ak) for ak, Qk in zip(a_fk, Q_fk)])
     
 def rednoise_psd2charstrain(amp_red, gamma_red):
     """
