@@ -100,13 +100,14 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
               "gwb_gamma": gwb_gamma}
     return psrdict
     
-def update_noise_spectra_approx(psrdict, pta_new):
+def update_noise_spectra_approx(psrdict, pta_new, return_psds=False):
     """
 Use the approximation NcalInv = Tf/Pn(f) to update
 in-place, each hasasia.sensitivity.Spectrum object in 'psrdict'
 with the noise properties of the respective pulsars in 
 'pta_new.psrlist'
     """
+    psds = [] if return_psds else None
     for p, instr in zip(pta_new.psrlist, psrdict["instruments"]):
         psd_new = build_pulsar_psd(psrdict["spectra"][p.name],
                                    p, instr,
@@ -114,6 +115,10 @@ with the noise properties of the respective pulsars in
                                    psrdict["gwb_strainamp"],
                                    psrdict["gwb_gamma"])
         psrdict["spectra"][p.name].update_NcalInv_with_approx(psd_new)
+        if return_psds:
+            psds.append(psd_new)
+    if return_psds:
+        return psds
     return
 
 def gwb_snr(psrdict,
