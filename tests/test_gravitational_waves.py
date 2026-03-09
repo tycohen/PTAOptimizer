@@ -99,6 +99,19 @@ class test_update_noise_spectra_approx(unittest.TestCase):
         # these should match to tight numerical tolerance.
         np.testing.assert_allclose(snr_A, snr_B, rtol=1e-10, atol=0.0)
 
+    def test_a_fk_direct_computation_matches_from_spectra_when_return_psds(self):
+        psds = gw.update_noise_spectra_approx(self.psrdict,
+                                              self.pta_new,
+                                              return_psds=True)
+        a_fk_from_SI = np.array([1 / s.S_I
+                                 for s in self.psrdict["spectra"].values()]).T
+        Tf = np.array([s.Tf for s in self.psrdict["spectra"].values()]).T
+        Rf = gw.hsen.resid_response(self.psrdict["freqs"])[:, None]
+        P_fk = np.array(psds).T
+        a_fk_from_P = Tf * Rf / P_fk
+        np.testing.assert_allclose(a_fk_from_P, a_fk_from_SI,
+                                   rtol=1e-10, atol=0.0)
+        
 class test_get_hasasia_psrs(unittest.TestCase):
 
     def setUp(self):
