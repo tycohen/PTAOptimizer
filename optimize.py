@@ -1629,7 +1629,7 @@ class OptimizeTime(object):
             v = v_lo + v_hi
             if np.any(v > 0.0):
                 # minimize f, so positive penalty
-                f = float(bound_penalty * np.dot(v, v)) / obj_scale
+                f = float(bound_penalty * np.dot(v, v))
 
                 # gradient of penalty: 2*w*v * dv/dx
                 # dv/dx = -1 where x<lo, +1 where x>hi, 0 otherwise
