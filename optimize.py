@@ -791,6 +791,66 @@ class OptimizeTime(object):
         """Convenience: return grad F(t) only."""
         _, grad = self.wn_objective_and_grad(t_vec, Qmat)
         return grad
+    
+    def wn_rn_objective_and_grad(self, t_vec,  Q_fk, psrdict):
+        """
+        White-noise + red-noise quadratic objective
+
+            :math: `F(t) \equiv \rho^2 = \sum_k a(f_k)^T {\bf Q}(f_k) a(f_k)`
+
+        where :math: `a(f_k) = 1 / S_I(f_k)`
+        and analytic gradient
+
+            :math: `dF/dt_i = -8 \Delta t sigma_i(t_i) sigmadot_i(t_i) \sum_{k=1}^{N_f} \left[\left(Q_k a_k \right)_i \right]\frac{a_i(f_k, t)}{P_i(f_k, t)}`
+
+        Parameters
+        ----------
+        t_vec : array-like, shape (N,)
+            Integration times in seconds 
+        Q_fk : ndarray, shape (N, N)
+            Noise-independent, frequency-dependent Q(f_k) block matrices
+        psrdict: dict
+            dictionary containing the following keys/values:
+                spectra: dict of hasasia.sensitivity.Spectrum objects
+                freqs: list or array of GW frequencies to compute spectrum
+                gwb_strainamp: dimensionless GWB strain amplitude
+                gwb_spindex: spectral index of dimensionless GWB strain spectrum
+        Returns
+        -------
+        F : float
+            rho^2
+        grad : ndarray, shape (N,)
+            dF/dt (units: rho^2 per second)
+        """
+        t_vec = np.asarray(t_vec, dtype=float)
+        # update psrdict["spectra"] with interpd sigmas using NcalInv approx
+        self._set_sigma_interp_lut(t_vec)
+        psds = gw.update_noise_spectra_approx(psrdict,
+                                              self.pta,
+                                              return_psds=True)
+
+        sigma_s, sigmadot_s = self._wn_sigma_and_sigmadot_seconds(t_vec)
+        a_fk = np.array([1 / s.S_I for s in psrdict["spectra"].values()]).T
+        F = gw.gwb_snr_quad(Q_fk, a_fk)
+
+        tconst = -8. * (gw.SECS_PER_YEAR / self.cadence) * sigma_s * sigmadot_s
+        P_fk = np.array(psds).T        
+        Qk_ak = np.einsum("kij,kj->ki", Q_fk, a_fk)
+        grad = tconst * np.sum(Qk_ak * (a_fk / P_fk), axis=0)
+        return F, grad
+
+    def wn_rn_objective_only(self, t_vec, Q_fk, psrdict):
+        """
+        Convenience: return F(t) = sum_k[a(f_k)^T Q(f_k) a(f_k)] only
+        from wn_rn_objective_and_grad
+        """
+        F, _ = self.wn_rn_objective_and_grad(t_vec, Q_fk, psrdict)
+        return F
+
+    def wn_rn_grad_only(self, t_vec, Q_fk, psrdict):
+        """Convenience: return grad F(t) only."""
+        _, grad = self.wn_rn_objective_and_grad(t_vec, Q_fk, psrdict)
+        return grad
 
     def _feasible_gradient_equal_bounds(self, t, gradF, eps_act=1e-10):
         """
