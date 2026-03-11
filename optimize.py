@@ -1603,7 +1603,9 @@ class OptimizeTime(object):
         hi = np.asarray(self.t_int_max, dtype=float).reshape(N)
         return Bounds(lo, hi, keep_feasible=True)
 
-    def _make_cached_fun_jac(self, Qmat, bound_penalty=1e12, obj_scale=1.0):
+    def _make_cached_fun_jac(self, objective_and_grad,
+                             objective_args=(),
+                             bound_penalty=1e12, obj_scale=1.0):
         """
         Return cached (fun, jac) for trust-constr on f(t) = -F(t)/obj_scale.
         """
@@ -1644,7 +1646,7 @@ class OptimizeTime(object):
                 return f, g
 
             # ---- SAFE: in-bounds, evaluate real objective/grad ----
-            F, gradF = self.wn_objective_and_grad(x, Qmat)
+            F, gradF = objective_and_grad(x, *objective_args)
             f = -float(F) / obj_scale
             g = -np.asarray(gradF, dtype=float) / obj_scale
 
@@ -1666,7 +1668,9 @@ class OptimizeTime(object):
 
     def maximize_snr_trust_constr(
         self,
-        Qmat,
+        Qobj,
+        noisemodel="wn",
+        psrdict=None,
         t0=None,
         maxiter=500,
         init_trustrad=1.0,
@@ -1679,15 +1683,22 @@ class OptimizeTime(object):
         return_history=False,
     ):
         """
-        Maximize WN-only objective F(t) subject to:
+        Maximize objective F(t) subject to:
             sum(t) = B
             tmin <= t <= tmax
-
+        Supports:
+            noisemodel='wn'   : WN-only quadratic form
+            noisemodel='wnrn' : WN + RN quadratic form
         Uses scipy.optimize.minimize(method="trust-constr") on f(t) = -F(t).
 
         Parameters
         ----------
-        Qmat : ndarray (N,N)
+        Qobj : numpy.ndarray
+            The noise-independent matrix (or matrix components) for computing
+        the objective - Q matrix (Npsr,Npsr) for WN-only or block-diag Q_fk
+        submatrices (N_GWfreq, Npsr, Npsr) for WN+RN. White noise-only by default
+        psrdict : dict, optional
+            Required for noisemodel='wnrn'
         t0 : optional initial guess (N,)
             If provided, will be projected to the feasible set {bounds + equality}.
         maxiter, gtol, xtol, barrier_tol : trust-constr tolerances
@@ -1716,24 +1727,50 @@ class OptimizeTime(object):
 
         # Ensure feasibility (bounds + equality) using your existing projector
         t0 = self.project_to_budget_equality(t0)
+
+        noisemodel = str(noisemodel).lower()
+        if noisemodel == "wn":
+            objective_and_grad = self.wn_objective_and_grad
+            objective_args = (Qobj,)
+        elif noisemodel == "wnrn":
+            if psrdict is None:
+                raise ValueError("psrdict must be provided for noisemodel='wnrn'.")
+
+            # Ensure the spectra update uses the interpolated sigma key.
+            interp_key = self.instr_name + "_sigma_interp"
+            psrdict["instruments"] = [interp_key] * len(self.pta.psrlist)
+
+            # Seed that interpolation key in the PTA before any objective call.
+            self._set_sigma_interp_lut(t0)
+
+            objective_and_grad = self.wn_rn_objective_and_grad
+            objective_args = (Qobj, psrdict)
+        else:
+            raise ValueError("Unknown noisemodel '{}'. "
+                             "Expected 'wn' or 'wnrn'.".format(noisemodel))
+        
         if obj_scale == "equal":
-            teq = self.project_to_budget_equality(np.full(N, B / N,
-                                                          dtype=float))
-            F0 = self.wn_objective_only(teq, Qmat)
+            teq = self.project_to_budget_equality(np.full(N, B / N, dtype=float))
+            F0, _ = objective_and_grad(teq, *objective_args)
             obj_scale = max(1.0, abs(float(F0)))
-        if obj_scale == "init":
-            F0 = self.wn_objective_only(t0, Qmat)
+        elif obj_scale == "init":
+            F0, _ = objective_and_grad(t0, *objective_args)
             obj_scale = max(1.0, abs(float(F0)))
+        else:
+            obj_scale = float(obj_scale)
+            if not np.isfinite(obj_scale) or obj_scale <= 0.0:
+                raise ValueError("obj_scale must be 'equal', 'init', or a "
+                                 "positive finite float; got {}".format(obj_scale))
         init_constrpenalty_eff = float(init_constrpenalty) / float(obj_scale)
         # --- constraints + bounds ---
         lc = self._budget_linear_constraint()
         bnds = self._time_bounds()
 
         # --- objective + jac (cached) ---
-        fun, jac = self._make_cached_fun_jac(Qmat,
+        fun, jac = self._make_cached_fun_jac(objective_and_grad,
+                                             objective_args=objective_args,
                                              bound_penalty=1e12,
                                              obj_scale=obj_scale)
-
         hist = [] if return_history else None
 
         def callback(x, state=None):
@@ -1741,11 +1778,9 @@ class OptimizeTime(object):
                 return
             x = np.asarray(x, dtype=float)
             # Evaluate true (max) objective for logging
-            F, gradF = self.wn_objective_and_grad(x, Qmat)
+            F, gradF = objective_and_grad(x, *objective_args)
 
-            # Approx “projected gradient” infinity norm for equality manifold:
-            # subtract mean to enforce sum-direction removal, then zero infeasible bound pushes.
-            # (This is a *diagnostic*, not used by trust-constr.)
+            # Approx “projected gradient” infinity norm for equality manifold
             g = np.asarray(gradF, float).copy()
             lam = float(np.mean(g))
             g = g - lam
@@ -1789,10 +1824,7 @@ class OptimizeTime(object):
         )
 
         t_star = np.asarray(res.x, dtype=float)
-
-        # trust-constr should satisfy equality tightly, but keep the check explicit
-        # (do NOT silently project here; that would invalidate res.success meaning)
-        F_star, _ = self.wn_objective_and_grad(t_star, Qmat)
+        F_star, gradF_star = objective_and_grad(t_star, *objective_args)
 
         info = {
             "success": bool(res.success),
@@ -1801,6 +1833,8 @@ class OptimizeTime(object):
             "n_iter": int(getattr(res, "nit", -1)),
             "n_eval": int(getattr(res, "nfev", -1)),
             "t": t_star,
+            "noisemodel": noisemodel,
+            "gradF": np.asarray(gradF_star, dtype=float),
             "F": float(F_star),
             "sum": float(np.sum(t_star)),
             "sum_err": float(np.sum(t_star) - B),
