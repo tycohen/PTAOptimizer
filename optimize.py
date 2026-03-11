@@ -831,7 +831,7 @@ class OptimizeTime(object):
 
         sigma_s, sigmadot_s = self._wn_sigma_and_sigmadot_seconds(t_vec)
         a_fk = np.array([1 / s.S_I for s in psrdict["spectra"].values()]).T
-        F = gw.gwb_snr_quad(Q_fk, a_fk)
+        F = gw.gwb_snr2_quad(Q_fk, a_fk)
 
         tconst = -8. * (gw.SECS_PER_YEAR / self.cadence) * sigma_s * sigmadot_s
         P_fk = np.array(psds).T        

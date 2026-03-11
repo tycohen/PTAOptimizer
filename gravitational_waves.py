@@ -286,9 +286,9 @@ def build_tildeQ_blocks(psrdict):
             for w_k, Sh_k in zip(trapz_freq_wts, Sh)]
     return np.array(Q_fk)
 
-def gwb_snr_quad(Q_fk, a_fk):
+def gwb_snr2_quad(Q_fk, a_fk):
     """
-    Compute the GWB S/N from the quadratic form
+    Compute the GWB S/N^2 from the quadratic form
     :math: `\rho^2 = \sum_k a(f_k)^T {\bf Q}(f_k) a(f_k)`
     """
     return np.sum([ak @ (Qk @ ak) for ak, Qk in zip(a_fk, Q_fk)])
