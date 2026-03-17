@@ -1041,7 +1041,6 @@ class OptimizeTime(object):
 
     def maximize_snr_reparam_lbfgsb(
         self,
-        Qmat,
         t0=None,
         k=None,
         dep_penalty_weight=1e6,
@@ -1063,7 +1062,7 @@ class OptimizeTime(object):
         """
         N = len(self.pta.psrlist)
         B = float(self.t_int_maxtot)
-
+        Qmat = self.calc_Qmat()
         # pick k if not given
         if k is None:
             # help the heuristic by using a feasible reference point
@@ -1287,9 +1286,7 @@ class OptimizeTime(object):
 
     def maximize_snr_trust_constr(
         self,
-        Qobj,
         noisemodel="wn",
-        psrdict=None,
         t0=None,
         maxiter=500,
         init_trustrad=1.0,
@@ -1312,12 +1309,6 @@ class OptimizeTime(object):
 
         Parameters
         ----------
-        Qobj : numpy.ndarray
-            The noise-independent matrix (or matrix components) for computing
-        the objective - Q matrix (Npsr,Npsr) for WN-only or block-diag Q_fk
-        submatrices (N_GWfreq, Npsr, Npsr) for WN+RN. White noise-only by default
-        psrdict : dict, optional
-            Required for noisemodel='wnrn'
         t0 : optional initial guess (N,)
             If provided, will be projected to the feasible set {bounds + equality}.
         maxiter, gtol, xtol, barrier_tol : trust-constr tolerances
@@ -1349,12 +1340,12 @@ class OptimizeTime(object):
 
         noisemodel = str(noisemodel).lower()
         if noisemodel == "wn":
+            Qobj = self.calc_Qmat()
+            psrdict = None
             objective_and_grad = self.wn_objective_and_grad
             objective_args = (Qobj,)
         elif noisemodel == "wnrn":
-            if psrdict is None:
-                raise ValueError("psrdict must be provided for noisemodel='wnrn'.")
-
+            Qobj, psrdict = self.calc_Qfk()
             # Ensure the spectra update uses the interpolated sigma key.
             interp_key = self.instr_name + "_sigma_interp"
             psrdict["instruments"] = [interp_key] * len(self.pta.psrlist)
@@ -1467,4 +1458,42 @@ class OptimizeTime(object):
             "constr_penalty": float(getattr(res, "constr_penalty", np.nan))
         }
         return t_star, float(F_star), info
-    
+
+    def calc_Qmat(self):
+        """
+        Returns:
+        -------
+        Qmat : numpy.ndarray
+            The noise-independent (Npsr,Npsr) matrix for computing the white
+        noise-only objective
+        """
+        psrdict = gw.get_hasasia_psrs(self.pta,
+                                      self.tint_grid_names[0] + self.optstr,
+                                      timespan_yr=self.timespan_yr,
+                                      cadence=self.cadence,
+                                      n_freqs=self.n_gw_freq,
+                                      use_best_instr=False,
+                                      gwb_strainamp=self.gwb_strainamp,
+                                      gwb_spindex=self.gwb_spindex)
+        return gw.build_Q_matrix(psrdict)
+
+    def calc_Qfk(self):
+        """
+        Returns:
+        -------
+        Q_fk : numpy.ndarray
+            The noise-independent (N_GWfreq, Npsr, Npsr) sub-matrices
+        Q_fk of the block-diagonal \tilde{Q} for computing the white noise +
+        red noise objective
+        psrdict : dict
+            Dictionary of pulsars, their spectra and GWB properties
+        """
+        psrdict = gw.get_hasasia_psrs(self.pta,
+                                      self.tint_grid_names[0] + self.optstr,
+                                      timespan_yr=self.timespan_yr,
+                                      cadence=self.cadence,
+                                      n_freqs=self.n_gw_freq,
+                                      use_best_instr=False,
+                                      gwb_strainamp=self.gwb_strainamp,
+                                      gwb_spindex=self.gwb_spindex)
+        return gw.build_tildeQ_blocks(psrdict), psrdict
