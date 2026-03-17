@@ -168,7 +168,7 @@ class test_quadratic_form_snr(unittest.TestCase):
     Test gravitational_waves.build_W_matrix, 
     gravitational_waves.build_Q_matrix,
     gravitational_waves.build_tildeQ_blocks,
-    gravitational_waves.gwb_snr_quad
+    gravitational_waves.gwb_snr2_quad
     """
     def setUp(self):
         # initialize pulsars with empty sigma dicts to be filled by ptzd
@@ -257,7 +257,7 @@ class test_quadratic_form_snr(unittest.TestCase):
         """
         Q_fk = gw.build_tildeQ_blocks(self.psrdict)
         a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
-        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+        snr_quadratic = np.sqrt(gw.gwb_snr2_quad(Q_fk, a_fk))
 
         sigmas_sec = np.array([p.sigmas["test_config"]["sigma_tot"] / 1e6
                                for p in self.pta.psrlist]) 
@@ -423,9 +423,9 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
                                    snr_quadratic,
                                    rtol=1e-8)
 
-class test_gwb_snr_quad_white_plus_red_noise(unittest.TestCase):
+class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
     """
-    Test gravitational_wave.gwb_snr_quad when the pulsar PSD contains
+    Test gravitational_wave.gwb_snr2_quad when the pulsar PSD contains
     both white and red noise
     """
     def setUp(self):
@@ -485,9 +485,9 @@ class test_gwb_snr_quad_white_plus_red_noise(unittest.TestCase):
         self.snr_gwbamp = 2.4e-15
         self.snr_gwbidx = -2/3
 
-    def test_gwb_snr_quad_matches_gwb_snr(self):
+    def test_gwb_snr2_quad_matches_gwb_snr(self):
         """
-        Test quadratic form in gravitational_waves.gwb_snr_quad
+        Test quadratic form in gravitational_waves.gwb_snr2_quad
         matches gravitational_waves.gwb_snr for pulsar PSDs containing
         white and red noise
         """
@@ -506,14 +506,14 @@ class test_gwb_snr_quad_white_plus_red_noise(unittest.TestCase):
         # compute the value from quadratic form
         Q_fk = gw.build_tildeQ_blocks(self.psrdict)
         a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
-        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+        snr_quadratic = np.sqrt(gw.gwb_snr2_quad(Q_fk, a_fk))
         np.testing.assert_allclose(gwb_snr,
                                    snr_quadratic,
                                    rtol=1e-8)
 
-    def test_gwb_snr_quad_matches_gwb_snr_after_update_approx(self):
+    def test_gwb_snr2_quad_matches_gwb_snr_after_update_approx(self):
         """
-        test gravitational_waves.gwb_snr_quad matches 
+        test gravitational_waves.gwb_snr2_quad matches 
         gravitational_waves.gwb_snr when the pulsar PSDs contain both
         white and red noise after updating spectra with 
         gravitational_waves.update_noise_spectra_approx
@@ -536,7 +536,7 @@ class test_gwb_snr_quad_white_plus_red_noise(unittest.TestCase):
         # compute the value from quadratic form
         Q_fk = gw.build_tildeQ_blocks(self.psrdict)
         a_fk = np.array([1 / s.S_I for s in self.psrdict["spectra"].values()]).T
-        snr_quadratic = np.sqrt(gw.gwb_snr_quad(Q_fk, a_fk))
+        snr_quadratic = np.sqrt(gw.gwb_snr2_quad(Q_fk, a_fk))
         np.testing.assert_allclose(gwb_snr,
                                    snr_quadratic,
                                    rtol=1e-8)
