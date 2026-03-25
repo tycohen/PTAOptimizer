@@ -7,6 +7,7 @@ import cma
 import PTAOptimizer.observatory_ops as oops
 from calc_timing import calc_timing
 import gravitational_waves as gw
+import samplers as samp
 import copy
 import datetime
 
@@ -1500,6 +1501,108 @@ class OptimizeTime(object):
                                       gwb_spindex=self.gwb_spindex)
         return gw.build_tildeQ_blocks(psrdict), psrdict
 
+    def random_multistart_optimizer(self,
+                                    nsamp=100,
+                                    maxiter=500,
+                                    spiky_delta_t=3600.,
+                                    k_depdt_lbfgsb=None,
+                                    init_trustrad=1e4,
+                                    init_trustconstrpen=1e3,
+                                    trustconstr_gtol=1e-8,
+                                    trustcontrs_xtol=1e-8,
+                                    verbose=False,
+                                    vverbose=False,
+                                    optimizer="trust-constr",
+                                    sample_type="uniform",
+                                    noisemodel="wn"):
+        """
+        An optimal solution stability diagnostic to test sensitivity
+        to optimizer initial conditions.
+        Run nsamp gradient optimizers (trust-constr or L-BFGS-B)
+        with randomly sampled initial time vectors either 'spiky'
+        (allocated to one pulsar near it's upper bound) or 'uniform'
+        on the feasible polytope that obey the budget. Supports
+        white noise-only noise model 'wn' or white noise + red noise
+        model 'wnrn'.
+        """
+        valid_samplers = ("spiky", "uniform")
+        valid_optimizers = ("trust-constr", "l-bfgs-b")
+        if optimizer.lower() not in valid_optimizers:
+            raise ValueError("{} is not a valid optimizer. "
+                             "Valid optimizers are {}".format(optimizer,
+                                                              valid_optimizers))
+        valid_noisemodels = ("wn", "wnrn")
+        if noisemodel.lower() not in valid_noisemodels:
+            raise ValueError("{} is not a valid noise model. "
+                             "Valid noise models are {}".format(noisemodel,
+                                                                valid_noisemodels))
+        N = len(self.pta.psrlist)
+        if optimizer.lower() == "l-bfgs-b" and noisemodel.lower() == "wnrn":
+            raise NotImplementedError("WN+RN not currently implemented "
+                                      "for L-BFGS-B")
+        if sample_type == "spiky":
+            t0s = samp.spiky_t0_vec(nsamp, N, self.t_int_max, self.t_int_min,
+                                    self.t_int_maxtot, spiky_delta_t)            
+        elif sample_type == "uniform":
+            t0s = samp.hit_and_run_budget_sampler(
+                    nsamp,
+                    np.full(N, self.t_int_min),
+                    self.t_int_max,
+                    self.t_int_maxtot)
+        else:
+            raise ValueError("{} is not a valid sample type. "
+                             "Valid sample types are {}".format(sample_type,
+                                                                valid_samplers))
+        t0s_proj = np.array([self.project_to_budget_equality(t) for t in t0s])
+        f_opts = []
+        t_opts = []
+        for i, t0 in enumerate(t0s_proj):
+            print("multistart iter {}/{}".format(i + 1, nsamp))
+            if optimizer.lower() == "l-bfgs-b":
+                t_opt, f_opt, debug = self.maximize_snr_reparam_lbfgsb(
+                    t0=t0,
+                    maxiter=maxiter,
+                    k=k_depdt_lbfgsb,
+                    verbose=vverbose,
+                    return_history=True)
+            if optimizer.lower() == "trust-constr":
+                if vverbose:
+                    vverbose = 2
+                if noisemodel.lower() == "wn":
+                    t_opt, f_opt, debug = self.maximize_snr_trust_constr(
+                        noisemodel="wn",
+                        t0=t0,
+                        maxiter=maxiter,
+                        init_trustrad=init_trustrad,
+                        init_constrpenalty=init_trustconstrpen,
+                        gtol=trustconstr_gtol,
+                        xtol=trustcontrs_xtol,
+                        verbose=vverbose,
+                        return_history=True)
+                if noisemodel.lower() == "wnrn":
+                    t_opt, f_opt, debug = self.maximize_snr_trust_constr(
+                        noisemodel="wnrn",
+                        t0=t0,
+                        maxiter=maxiter,
+                        init_trustrad=init_trustrad,
+                        init_constrpenalty=init_trustconstrpen,
+                        gtol=trustconstr_gtol,
+                        xtol=trustcontrs_xtol,
+                        verbose=vverbose,
+                        return_history=True)
+            f_opts.append(f_opt)
+            t_opts.append(t_opt)
+            eps_kkt, kkt_info = kkt_residual_box_eq(debug["gradF"], t_opt,
+                                                    self.t_int_min,
+                                                    self.t_int_max,
+                                                    self.t_int_maxtot,
+                                                    scale=True, tol=1e-4)
+            if (eps_kkt > 1e-3) and verbose:
+                print("eps_kkt > 1e-3 for iter {}. "
+                      "Inspect convergence.".format(i))
+        return np.array(t_opts), np.array(f_opts), np.array(t0s_proj)
+
+    
 def kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget,
                         tol=1e-8, scale=True):
     """
