@@ -1499,3 +1499,74 @@ class OptimizeTime(object):
                                       gwb_strainamp=self.gwb_strainamp,
                                       gwb_spindex=self.gwb_spindex)
         return gw.build_tildeQ_blocks(psrdict), psrdict
+
+def kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget,
+                        tol=1e-8, scale=True):
+    """
+    Bound-aware KKT residual for maximize F(t)=rho^2 subject to:
+    t_mins[i] <= tvec[i] <= t_maxes[i],  sum(tvec)=t_budget.
+
+    Parameters
+    ----------
+    gradF    : (n,) gradient of F wrt t at the point t
+    tvec     : (n,) vector of integration times (seconds)
+    t_mins   : (n,) lower bounds (seconds)
+    t_maxes  : (n,) upper bounds (seconds)
+    t_budget : scalar time budget (seconds)
+    tol      : t_mins, t_maxes absolute boundary tolerance (seconds)
+    scale    : (bool) return a normalized residual
+
+    Returns
+    -------
+    eps_kkt : scalar residual (scaled if scale=True)
+    info : dict with lambda, residual vector, feasibility, active sets
+    """
+    t = np.asarray(tvec, float)
+    gradF = np.asarray(gradF, float)
+    l = np.asarray(t_mins, float)
+    u = np.asarray(t_maxes, float)
+
+    at_lo = t <= (l + tol)
+    at_hi = t >= (u - tol)
+    interior = ~(at_lo | at_hi)
+
+    # Estimate lambda
+    if np.any(interior):
+        lam = np.median(gradF[interior])
+    else:
+        # lambda should satisfy: gradF[lo] >= lam >= gradF[hi]
+        lo_min = np.min(gradF[at_lo]) if np.any(at_lo) else np.inf
+        hi_max = np.max(gradF[at_hi]) if np.any(at_hi) else -np.inf
+        if hi_max <= lo_min:
+            lam = 0.5 * (hi_max + lo_min)
+        else:
+            # No lambda can satisfy the bound KKT inequalities
+            lam = np.mean(gradF)  # fallback; residual will be large
+
+    # Build bound-aware violation residual r
+    r = np.zeros_like(gradF)
+    r[interior] = gradF[interior] - lam
+    # at lower: want gradF - lam <= 0  -> violation is positive part
+    r[at_lo] = np.maximum(0.0, gradF[at_lo] - lam)
+    # at upper: want gradF - lam >= 0  -> violation is pos part of (lam - gradF)
+    r[at_hi] = np.maximum(0.0, lam - gradF[at_hi])
+
+    r_inf = np.max(np.abs(r)) if r.size else 0.0
+    feas_eq = abs(np.sum(t) - t_budget)
+
+    if scale:
+        denom = max(1.0, np.max(np.abs(gradF)), abs(lam))
+        eps_kkt = max(r_inf / denom, feas_eq / max(1.0, abs(t_budget)))
+    else:
+        eps_kkt = max(r_inf, feas_eq)
+
+    info = dict(
+        lambda_=lam,
+        r=r,
+        r_inf=r_inf,
+        feas_eq=feas_eq,
+        n_lo=int(np.sum(at_lo)),
+        n_hi=int(np.sum(at_hi)),
+        n_int=int(np.sum(interior)),
+    )
+    return eps_kkt, info
