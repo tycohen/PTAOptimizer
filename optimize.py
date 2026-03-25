@@ -1060,6 +1060,7 @@ class OptimizeTime(object):
         Dependent bound feasibility t_k in [tmin, tmax_k] is enforced via
         a smooth quadratic penalty (weight dep_penalty_weight).
         """
+        self._lut_check()
         N = len(self.pta.psrlist)
         B = float(self.t_int_maxtot)
         Qmat = self.calc_Qmat()
@@ -1328,6 +1329,7 @@ class OptimizeTime(object):
         F_star : float
         info : dict
         """
+        self._lut_check()
         N = len(self.pta.psrlist)
         B = float(self.t_int_maxtot)
 
