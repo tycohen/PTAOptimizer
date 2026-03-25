@@ -1625,6 +1625,78 @@ class OptimizeTime(object):
                       "Inspect convergence.".format(i))
         return np.array(t_opts), np.array(f_opts), np.array(t0s_proj)
 
+    def random_timeswap_perturbation(self, t_opt, nswaps=100,
+                                     noisemodel="wn",
+                                     F_opt=None, delta_t=3600.0,
+                                     adaptive_delta=False,
+                                     verbose=False, tol=1e-10):
+        """
+        Heuristic local-optimality check:
+        move +delta_t from j -> i (i gains time, j loses time), keeping sum fixed.
+        Returns: swap indices array, swap time vectors, delta F
+        """
+        N = len(self.pta.psrlist)
+
+        if noisemodel == "wn":
+            objective_and_grad = self.wn_objective_and_grad
+            Qobj = self.calc_Qmat()        
+            objective_args = (Qobj,)
+        elif noisemodel == "wnrn":
+            Qobj, psrdict = self.calc_Qfk()
+            # Ensure the spectra update uses the interpolated sigma key.
+            interp_key = self.instr_name + "_sigma_interp"
+            psrdict["instruments"] = [interp_key] * len(self.pta.psrlist)
+
+            # Seed that interpolation key in the PTA before any objective call.
+            self._set_sigma_interp_lut(t_opt)
+
+            objective_and_grad = self.wn_rn_objective_and_grad
+            objective_args = (Qobj, psrdict)
+        else:
+            raise ValueError("Unknown noisemodel '{}'. "
+                             "Expected 'wn' or 'wnrn'.".format(noisemodel))
+
+
+        if F_opt is None:
+            F_opt, _ = objective_and_grad(t_opt, *objective_args)
+
+        swap_idxs = [np.random.choice(N, size=2, replace=False) for _ in range(nswaps)]
+        F_swaps = np.full(nswaps, np.nan, dtype=float)
+        t_swaps = np.empty((nswaps, N), dtype=float)
+
+        tmin = float(self.t_int_min)
+        tmax = np.asarray(self.t_int_max, dtype=float).reshape(N)
+
+        for k, (i, j) in enumerate(swap_idxs):
+            t = t_opt.copy()
+
+            if adaptive_delta:
+                max_dt = min(tmax[i] - t[i], t[j] - tmin)
+                if max_dt <= 0:
+                    t_swaps[k] = t
+                    continue
+                dt = min(delta_t, 0.99 * max_dt)
+            else:
+                dt = delta_t
+
+            t[i] += dt
+            t[j] -= dt
+            t_swaps[k] = t
+
+            # sum is preserved by construction; no projection
+            if not self._feasible(t, tol=1e-8):
+                F_swaps[k] = np.nan
+                continue
+
+            F, _ = objective_and_grad(t, *objective_args)
+            F_swaps[k] = F
+
+            if verbose and (F > F_opt):
+                print("Swap {:.1f}s: {} -> {} gives higher F ({:.4f})"
+                      " than F_opt ({:.4f})".format(dt, j, i, F, F_opt))
+
+        return swap_idxs, t_swaps, (F_swaps - F_opt)
+
     
 def kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget,
                         tol=1e-8, scale=True):
