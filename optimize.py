@@ -92,7 +92,27 @@ class OptimizeTime(object):
 
     Attributes:
     ----------
-
+    pta : pta.PTA instance
+    nus : evenly-spaced numpy.ndarray of observing frequencies (GHz)
+    rxspecfile : default name or path to receiver specifications file
+    dec_lim : tuple of (max, min) telescope declination limits (deg)
+    lat : (float) telescope latitude (deg)
+    t_int0 : (numpy.ndarray) initial, per-pulsar integration times (sec)
+    t_int_min : (float) minimum integration time (sec)
+    t_int_maxtot : (float) total time budget per epoch (sec)
+    epoch_days : (float) length of an epoch (days)
+    timefac : (numpy.ndarray) len(nus) flags to turn on freq-dependent t_int
+    gainmodel : (str) telescope elevation-dependent gain model ('cos', 'exp' )
+    gainexp : (float or numpy.ndarray) exponent for 'cos' gain model
+    optimize_freq : (optimize.OptimizeFrequency) freq optimization parameters
+    timespan_yr : (float) PTA data duration (assumed common across pulsars)
+    cadence : (int) number of observations per year
+    n_gw_freq : (int) number of GW frequencies at which to estimate spectra
+    gwb_strainamp : (float) GWB dimensionless strain amplitude (default NG15)
+    gwb_spindex : (float) GWB dimensionless strain spectral index (default circular)
+    use_best_instr : not implemented
+    max_evals : (int) maximum evaluations for self.maximize_snr_with_cma
+    max_workers : (int) maximum parallel processes when computing PTA sigmas
     """
     def __init__(self,
                  pta,
@@ -152,6 +172,9 @@ class OptimizeTime(object):
         self.instr_name_opt = self.instr_name + self.optstr
         self.max_workers = max_workers
         self.max_evals = max_evals
+        if isinstance(timespan_yr, (list, np.ndarray)):
+            raise NotImplementedError("Per-pulsar dataspans not currently "
+                                      "supported.")
         self.timespan_yr = timespan_yr
         self.cadence = cadence
         self.n_gw_freq = n_gw_freq
