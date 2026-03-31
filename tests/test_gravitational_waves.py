@@ -18,19 +18,27 @@ class test_update_noise_spectra_approx(unittest.TestCase):
         self.pulsar1_old = Pulsar(name="testpulsar1",
                                  dec=90.,
                                  ra=180.,
-                                 sigmas={"test_config": {"sigma_tot": 10.}})
+                                  sigmas={"test_config": {"sigma_tot": 10.}},
+                                  redamp=0.,
+                                  redgamma=0.)
         self.pulsar2_old = Pulsar(name="testpulsar2",
                                   dec=0.,
                                   ra=0.,
-                                  sigmas={"test_config": {"sigma_tot": 10.}})
+                                  sigmas={"test_config": {"sigma_tot": 10.}},
+                                  redamp=0.,
+                                  redgamma=0.)
         self.pulsar1_new = Pulsar(name="testpulsar1",
                                  dec=90.,
                                  ra=180.,
-                                 sigmas={"test_config": {"sigma_tot": 1.}})
+                                  sigmas={"test_config": {"sigma_tot": 1.}},
+                                  redamp=0.,
+                                  redgamma=0.)
         self.pulsar2_new = Pulsar(name="testpulsar2",
                                  dec=0.,
                                  ra=0.,
-                                 sigmas={"test_config": {"sigma_tot": 1.}})
+                                  sigmas={"test_config": {"sigma_tot": 1.}},
+                                  redamp=0.,
+                                  redgamma=0.)
         self.pta_old = PTA(psrlist=[self.pulsar1_old, self.pulsar2_old])
         self.pta_new = PTA(psrlist=[self.pulsar1_new, self.pulsar2_new])        
         self.psrdict = gw.get_hasasia_psrs(self.pta_old, "test_config",
@@ -74,9 +82,13 @@ class test_update_noise_spectra_approx(unittest.TestCase):
         """
         # two psrdicts with very different initial sigmas
         p1_noisy = Pulsar(name="testpulsar1", dec=90., ra=180.,
-                          sigmas={"test_config": {"sigma_tot": 1000.}})
+                          sigmas={"test_config": {"sigma_tot": 1000.}},
+                          redamp=0.,
+                          redgamma=0.)
         p2_noisy = Pulsar(name="testpulsar2", dec=0., ra=0.,
-                          sigmas={"test_config": {"sigma_tot": 1000.}})
+                          sigmas={"test_config": {"sigma_tot": 1000.}},
+                          redamp=0.,
+                          redgamma=0.)
         pta_noisy = PTA(psrlist=[p1_noisy, p2_noisy])
 
         # psrdict_A uses "old" (10 us); psrdict_B uses "very noisy" (1000 us)
@@ -118,11 +130,15 @@ class test_get_hasasia_psrs(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1",
                               dec=90.,
                               ra=180.,
-                              sigmas={"test_config": {"sigma_tot": 10.}})
+                              sigmas={"test_config": {"sigma_tot": 10.}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pulsar2 = Pulsar(name="testpulsar2",
                               dec=0.,
                               ra=0.,
-                              sigmas={"test_config": {"sigma_tot": 1.}})
+                              sigmas={"test_config": {"sigma_tot": 1.}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pta = PTA(psrlist=[self.pulsar1, self.pulsar2])
         self.gwb_spindex = -2 / 3.
         self.psrdict = gw.get_hasasia_psrs(self.pta, "test_config",
@@ -175,19 +191,27 @@ class test_quadratic_form_snr(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1",
                               dec=90.,
                               ra=180.,
-                              sigmas={"test_config": {"sigma_tot": None}})
+                              sigmas={"test_config": {"sigma_tot": None}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pulsar2 = Pulsar(name="testpulsar2",
                               dec=0.,
                               ra=0.,
-                              sigmas={"test_config": {"sigma_tot": None}})
+                              sigmas={"test_config": {"sigma_tot": None}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pulsar3 = Pulsar(name="testpulsar3",
                               dec=45.,
                               ra=270.,
-                              sigmas={"test_config": {"sigma_tot": None}})
+                              sigmas={"test_config": {"sigma_tot": None}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pulsar4 = Pulsar(name="testpulsar4",
                               dec=60.,
                               ra=270.,
-                              sigmas={"test_config": {"sigma_tot": None}})
+                              sigmas={"test_config": {"sigma_tot": None}},
+                              redamp=0.,
+                              redgamma=0.)
         self.pta = PTA(psrlist=[self.pulsar1,
                                 self.pulsar2,
                                 self.pulsar3,
@@ -300,6 +324,8 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1", #J1713+0747
                         dec=7.79,
                         ra=258.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr1)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -309,6 +335,8 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         self.pulsar2 = Pulsar(name="testpulsar2", #J1643-1224
                         dec=-12.42,
                         ra=250.91,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr2)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -318,6 +346,8 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         self.pulsar3 = Pulsar(name="testpulsar3", #J2145-0750
                         dec=-7.84,
                         ra=326.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr3)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -327,6 +357,8 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         self.pulsar4 = Pulsar(name="testpulsar4", #J2017+0603
                         dec=6.05,
                         ra=304.35,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr4)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -336,6 +368,8 @@ class test_gwb_snr_white_noise_only(unittest.TestCase):
         self.pulsar5 = Pulsar(name="testpulsar5", #J1102+0249
                         dec=2.824,
                         ra=165.675,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr5)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -435,6 +469,8 @@ class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1", #J1713+0747
                         dec=7.79,
                         ra=258.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr1)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -444,6 +480,8 @@ class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
         self.pulsar2 = Pulsar(name="testpulsar2", #J1643-1224
                         dec=-12.42,
                         ra=250.91,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr2)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -453,6 +491,8 @@ class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
         self.pulsar3 = Pulsar(name="testpulsar3", #J2145-0750
                         dec=-7.84,
                         ra=326.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr3)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -462,6 +502,8 @@ class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
         self.pulsar4 = Pulsar(name="testpulsar4", #J2017+0603
                         dec=6.05,
                         ra=304.35,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr4)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -471,6 +513,8 @@ class test_gwb_snr2_quad_white_plus_red_noise(unittest.TestCase):
         self.pulsar5 = Pulsar(name="testpulsar5", #J1102+0249
                         dec=2.824,
                         ra=165.675,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr5)},
                         sigmas={"testconfig_tint{}".format(i):

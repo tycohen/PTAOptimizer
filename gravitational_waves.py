@@ -63,12 +63,10 @@ GW frequencies, PTA cadence, GWB strain amplitude, and GWB spectral index
 
     sigma_tots = np.array([p.sigmas[i]["sigma_tot"]
                            for i, p in zip(instr, pta.psrlist)])
-    try:
-        rn_strainamps = np.array([p.rn_strainamp for p in pta.psrlist])
-        rn_strainidxs = np.array([p.rn_strainindex for p in pta.psrlist])
-    except AttributeError:
-        rn_strainamps = None
-        rn_strainidxs = None
+    rn_strainamps = np.array([p.redamp for p in pta.psrlist])
+    rn_strainidxs = np.array([p.redalpha for p in pta.psrlist])
+    # guard against adding exactly zero RN
+    rn_strainamps[rn_strainamps == 0.] = 1e-20
     max_time_s = max(timespans) * SECS_PER_YEAR
     freqs = np.linspace(1 / max_time_s,
                         0.5 * cadence / SECS_PER_YEAR,
@@ -182,12 +180,10 @@ def build_pulsar_psd(sp, pulsar, instr, cad, gwb_amp, gwb_gamma):
 
     new_psd: (numpy.ndarray) new PSD with same length as 'sp'
     """
-    try:
-        rnamp = pulsar.rn_strainamp
-        rnidx = pulsar.rn_strainindex
-    except AttributeError:
-        rnamp = 0
-        rnidx = 0
+    # guard against adding exactly zero RN
+    rnamp = 1e-20 if pulsar.redamp == 0. else pulsar.redamp
+    rnidx = pulsar.redgamma
+    
     # hasasia convention is positive gamma
     new_psd = sp.add_white_noise_power(pulsar.sigmas[instr]["sigma_tot"] * 1e-6,
                                        SECS_PER_YEAR / cad, vals=True) \

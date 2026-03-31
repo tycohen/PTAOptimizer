@@ -21,6 +21,8 @@ class test_OptimizeTime_state_when_using_LUT(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1",
                               dec=90.,
                               ra=180.,
+                              redamp=0.,
+                              redgamma=0.,
                               t_int={"testconfig_tint0": 100.,
                                      "testconfig_tint1": 2.78255940e02},
                               sigmas={"testconfig_tint0": {"sigma_tot": 0.1},
@@ -28,6 +30,8 @@ class test_OptimizeTime_state_when_using_LUT(unittest.TestCase):
         self.pulsar2 = Pulsar(name="testpulsar2",
                               dec=0.,
                               ra=0.,
+                              redamp=0.,
+                              redgamma=0.,
                               t_int={"testconfig_tint0": 100.,
                                      "testconfig_tint1": 2.78255940e02},
                               sigmas={"testconfig_tint0": {"sigma_tot": 0.1},
@@ -108,7 +112,9 @@ class test_OptimizeTime_project_budget_to_equality(unittest.TestCase):
         # OptimizeTime attributes computed from pulsar attributes
         self.testpulsar = Pulsar(name="testpulsar1",
                                  dec=90.,
-                                 ra=180.)
+                                 ra=180.,
+                                 redamp=0.,
+                                 redgamma=0.)
         self.pta = PTA(psrlist=[self.testpulsar] * npsrs)
         self.ot = optimize.OptimizeTime(self.pta,
                                         # nus not needed when using LUT
@@ -149,7 +155,9 @@ class test_OptimizeTime_project_budget_to_equality(unittest.TestCase):
         t_vec_in = np.full(4, 0.)
         self.testpulsar = Pulsar(name="testpulsar1",
                                  dec=90.,
-                                 ra=180.)
+                                 ra=180.,
+                                 redamp=0.,
+                                 redgamma=0.)
         self.pta = PTA(psrlist=[self.testpulsar] * npsrs)
         self.ot = optimize.OptimizeTime(self.pta,
                                         # nus not needed when using LUT
@@ -191,6 +199,8 @@ class test_OptimizeTime_wn_objective_and_grad(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1", #J1713+0747
                         dec=7.79,
                         ra=258.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr1)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -200,6 +210,8 @@ class test_OptimizeTime_wn_objective_and_grad(unittest.TestCase):
         self.pulsar2 = Pulsar(name="testpulsar2", #J1643-1224
                         dec=-12.42,
                         ra=250.91,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr2)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -209,6 +221,8 @@ class test_OptimizeTime_wn_objective_and_grad(unittest.TestCase):
         self.pulsar3 = Pulsar(name="testpulsar3", #J2145-0750
                         dec=-7.84,
                         ra=326.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr3)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -218,6 +232,8 @@ class test_OptimizeTime_wn_objective_and_grad(unittest.TestCase):
         self.pulsar4 = Pulsar(name="testpulsar4", #J2017+0603
                         dec=6.05,
                         ra=304.35,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr4)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -227,6 +243,8 @@ class test_OptimizeTime_wn_objective_and_grad(unittest.TestCase):
         self.pulsar5 = Pulsar(name="testpulsar5", #J1102+0249
                         dec=2.824,
                         ra=165.675,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr5)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -449,6 +467,8 @@ class test_OptimizeTime_wn_rn_objective_and_grad(unittest.TestCase):
         self.pulsar1 = Pulsar(name="testpulsar1", #J1713+0747
                         dec=7.79,
                         ra=258.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr1)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -458,6 +478,8 @@ class test_OptimizeTime_wn_rn_objective_and_grad(unittest.TestCase):
         self.pulsar2 = Pulsar(name="testpulsar2", #J1643-1224
                         dec=-12.42,
                         ra=250.91,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr2)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -467,6 +489,8 @@ class test_OptimizeTime_wn_rn_objective_and_grad(unittest.TestCase):
         self.pulsar3 = Pulsar(name="testpulsar3", #J2145-0750
                         dec=-7.84,
                         ra=326.46,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr3)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -476,6 +500,8 @@ class test_OptimizeTime_wn_rn_objective_and_grad(unittest.TestCase):
         self.pulsar4 = Pulsar(name="testpulsar4", #J2017+0603
                         dec=6.05,
                         ra=304.35,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr4)},
                         sigmas={"testconfig_tint{}".format(i):
@@ -485,6 +511,8 @@ class test_OptimizeTime_wn_rn_objective_and_grad(unittest.TestCase):
         self.pulsar5 = Pulsar(name="testpulsar5", #J1102+0249
                         dec=2.824,
                         ra=165.675,
+                        redamp=0.,
+                        redgamma=0.,
                         t_int={"testconfig_tint{}".format(i) : t
                                for i, t in enumerate(tint_psr5)},
                         sigmas={"testconfig_tint{}".format(i):
