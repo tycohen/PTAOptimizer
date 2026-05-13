@@ -1,3 +1,5 @@
+from os import path
+
 class PTA(object):
     """
     Class to store all timed pulsars
@@ -109,3 +111,136 @@ class PTA(object):
         with open(filename, "w") as f:
             f.write(header + "\n".join(rows))
         return
+
+    def make_deluxetable(self, exclude_names=[], save=True, savedir=".",
+                         split_row_idx=None,
+                         longtable=False,
+                         fontsize=r"scriptsize",
+                         comments_macro="table caption"):
+        """
+        Make a publication-quality AASTex deluxetable
+
+        Parameters
+        ----------
+        exclude_names : list
+            names of pulsars to exclude from the table
+        save : bool
+            save to file with name self.name + 'psr_params.tex'
+        savedir : str
+            path to save directory
+        split_row_idx : None
+            optional list of indices to the left of which to split the table
+        vertically, created len(split_row_idx) separate tables
+        longtable : bool
+            adds a \startlongtable before table environment
+        fontsize : raw str
+            latex named font size (no backslash)
+        comments_macro : str
+            optional latex macro for inserting content into \tablecomments
+        """
+        if not path.isdir(savedir):
+            raise FileNotFoundError("'savedir' {} does not exist.".format(savedir))
+        if split_row_idx is not None and len(split_row_idx) == 0:
+            raise ValueError("split_row_idx must be a list with "
+                             "at least one value.")
+        psrs_incl = sorted([p for p in self.psrlist if p.name not in exclude_names],
+                           key=lambda p: float(p.name[1:5]))
+        npsr = len(psrs_incl)
+        name_column = {"attr": "name", "label": "Pulsar", "unit": "", "fmt": "{}"}
+        cols = [
+            name_column,
+            # {"attr": "ra", "label": "R.A.", "unit": r"($^\circ$)",
+            #  "fmt": "{:.4f}"}
+            # {"attr": "dec", "label": "Dec.", "unit": r"($^\circ$)",
+            #  "fmt": "{:.4f}"}
+            {"attr": "period", "label": r"$P$", "unit": "(ms)",
+             "fmt":  lambda x: "{:.2f}".format(x * 1000.)},
+            {"attr": "dm", "label": r"DM", "unit": r"($\mathrm{pc\,cm^{-3}}$)",
+             "fmt": "{:.2f}"},
+            {"attr": "taud", "label": r"$\tau_d$", "unit": r"($\mathrm{\mu s}$)",
+             "fmt": lambda x: sci_latex(x, ndp=1)},
+            {"attr": "dtd", "label": r"$\Delta \tau_d$", "unit": r"(s)",
+             "fmt": "{:.1f}"},
+            {"attr": "dnud", "label": r"$\Delta \nu_d$", "unit": r"(GHz)",
+             "fmt": lambda x: sci_latex(x, ndp=1)},
+            {"attr": "dist", "label": r"$d$", "unit": r"(kpc)",
+             "fmt": "{:.2f}"},
+            {"attr": "s_1000", "label": r"$S_{1000}$", "unit": "(mJy)",
+             "fmt": "{:.2f}"},
+            {"attr": "spindex", "label": r"$\alpha$", "unit": "",
+             "fmt": "{:.2f}"},
+            {"attr": "w50", "label": r"$W_{50}$", "unit": "($\mathrm{\mu s}$)",
+             "fmt": "{:.2f}"},
+            {"attr": "weff", "label": r"$W_\mathrm{eff}$", "unit": "($\mathrm{\mu s}$)",
+             "fmt": "{:.2f}"},
+            {"attr": "uscale", "label": r"$U_\mathrm{scale}$", "unit": "",
+             "fmt": "{:.2f}"},
+            {"attr": "sig_j_single", "label": r"$\sigma_\mathrm{J,1}$",
+             "unit": "($\mathrm{\mu s}$)",
+             "fmt": "{:.2f}"},
+            {"attr": "redamp", "label": r"$A_\mathrm{red}$",
+             "unit": "", "fmt": lambda x: sci_latex(x, ndp=2)},
+            {"attr": "redgamma", "label": r"$\gamma_\mathrm{red}$",
+             "unit": "", "fmt": "{:.2f}"}
+            ]
+        col_fmt = "l" + "c" * (len(cols) - 1)
+        tablecaption = (r"\tablecaption{{Adopted Pulsar Parameters"
+                        "\label{{tab:{0}_pulsar_params}}}}".format(self.name))
+        tabhead_lines = [
+            r"\begin{{deluxetable}}{{{}}}".format(col_fmt),
+            r"\tabletypesize{{\{}}}".format(fontsize),
+            tablecaption,
+            r"\tablehead{",
+            r" & ".join(["\colhead{{{}}}".format(c["label"]) for c in cols]) + "\\\\",
+            r" & ".join(["\colhead{{{}}}".format(c["unit"]) for c in cols]) + "\\\\",
+            r"}",
+            r"\startdata"
+        ]
+        if longtable:
+            tabhead_lines.insert(0, r"\startlongtable")
+        data = [" & ".join([apply_fmt(c["fmt"], getattr(p, c["attr"])) for c in cols]) \
+                + ("\\\\" if i < npsr - 1 else "")
+                for i, p in enumerate(psrs_incl)]
+        tablecomments = r"\tablecomments{{{}}}".format(comments_macro)
+        tabfoot_lines = [
+            r"\enddata",
+            tablecomments,
+            r"\end{deluxetable}"
+            ]
+        if split_row_idx is not None: # create len(split_row_idx) separate tables
+            data_split = [data[a:b] for a, b in zip([0] + split_row_idx,
+                                                    split_row_idx + [None])]
+            new_caption = r"\tablecaption{continued}"
+            split_tabs = []
+            for i, d in enumerate(data_split):
+                split_tabs.append("\n".join(["\n".join(tabhead_lines),
+                                             "\n".join(d),
+                                             "\n".join(tabfoot_lines)]))
+                table = "\n".join(split_tabs)
+                if i == 0: # 'Continued' caption after first sub-table
+                    tabhead_lines.insert(0, r"\addtocounter{table}{-1}")
+                    tabhead_lines = [new_caption if l == tablecaption else l
+                                     for l in tabhead_lines]
+                    tabfoot_lines.remove(tablecomments)
+        else:
+            table = "\n".join(["\n".join(tabhead_lines),
+                               "\n".join(data),
+                               "\n".join(tabfoot_lines)])
+        if save:
+            fname = "{}_psr_params.tex".format(self.name)
+            with open(path.join(savedir, fname), "w") as out:
+                out.write(table)
+        return table
+
+def sci_latex(x, ndp=1):
+    mant, exp = f"{x:.{ndp}e}".split("e")
+    if exp in ("+00", "+01"):
+        return f"{x:.{ndp}f}"
+    else:
+        return rf"${mant} \times 10^{{{int(exp)}}}$"
+
+def apply_fmt(fmt, value):
+    if callable(fmt):
+        return fmt(value)
+    return fmt.format(value)
+    
