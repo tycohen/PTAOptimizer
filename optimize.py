@@ -4,7 +4,7 @@ from scipy.interpolate import PchipInterpolator
 from scipy.optimize import minimize, Bounds, LinearConstraint
 import numpy as np
 import cma
-import PTAOptimizer.observatory_ops as oops
+import observatory_ops as oops
 from calc_timing import calc_timing
 import gravitational_waves as gw
 import samplers as samp
