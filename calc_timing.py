@@ -225,13 +225,28 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                                       1.,
                                                       T=t_int_psr,
                                                       rxspecfile=rxspecfile)
-            scope_noise_init_opt.gain = oops.get_gains(scope,
+            # interpolate gainexp and timefac flags to optimal nus array
+            if isinstance(gainexp, np.ndarray):
+                gainexp_opt = np.interp(nus_opt, nus, gainexp)
+            else:
+                gainexp_opt = gainexp
+            scope_opt = Telescope(name=scope.name,
+                                  dec_lim=scope.dec_lim,
+                                  lat=scope.lat,
+                                  gainmodel=scope.gainmodel,
+                                  gainexp=gainexp_opt)
+            if isinstance(timefac, np.ndarray):
+                timefac_opt = np.interp(nus_opt, nus, timefac)
+                scope_opt.timefac = timefac_opt                
+            else:
+                scope_opt.timefac = timefac
+            scope_noise_init_opt.gain = oops.get_gains(scope_opt,
                                         p.dec,
                                         scope_noise_init_opt.get_gain(nus_opt))
             if isinstance(timefac, np.ndarray):
                 scope_noise_init_opt.T = get_tobs(
                     scope_noise_init_opt.get_T(nus_opt),
-                    scope,
+                    scope_opt,
                     p.dec)
             else:
                 scope_noise_init_opt.T = scope_noise_init_opt.get_T(nus_opt)
