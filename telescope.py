@@ -25,7 +25,8 @@ class Telescope(object):
                  alt_lim=None,
                  lat=None,
                  gainmodel=None,
-                 gainexp=None):
+                 gainexp=None,
+                 timefac=None):
 
         self.name = name
         dec_lim_formatstr = ("Limits must be between (inclusive) -90 and 90 deg. "
@@ -55,3 +56,4 @@ class Telescope(object):
         else:
             self.gainmodel = gainmodel
         self.gainexp = gainexp
+        self.timefac = timefac
