@@ -147,7 +147,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
         return p.name, scope.name, (-2, -2, -2, -2, -2), scope_noise_init, {}
     else:
         if isinstance(timefac, np.ndarray):
-            scope_noise_init.T = get_tobs(scope_noise_init.get_T(nus),
+            scope_noise_init.T = oops.get_tobs(scope_noise_init.get_T(nus),
                                      scope,
                                      p.dec)
         else:
@@ -244,7 +244,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                         p.dec,
                                         scope_noise_init_opt.get_gain(nus_opt))
             if isinstance(timefac, np.ndarray):
-                scope_noise_init_opt.T = get_tobs(
+                scope_noise_init_opt.T = oops.get_tobs(
                     scope_noise_init_opt.get_T(nus_opt),
                     scope_opt,
                     p.dec)
@@ -275,20 +275,6 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
 
             return (p.name, scope.name + "_freqopt",
                     sigma_tup_opt, scope_noise_opt, optimum)
-
-def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
-    if abs(psr_dec - scope.lat) >= 90. - horiz:
-        # source never rises
-        if isinstance(t0, (list, np.ndarray)): 
-            t_obs = np.zeros(len(t0))
-        elif isinstance(t0, (int, float)):
-            t_obs = 0.
-    elif abs(psr_dec + scope.lat) >= 90. + horiz:
-        # source never sets
-        t_obs = t0 * (2 * np.cos(np.radians(psr_dec)) ** -1) ** scope.timefac
-    else:
-        t_obs = t0 * (np.cos(np.radians(psr_dec)) ** -1) ** scope.timefac
-    return np.clip(t_obs, 0., cutoff)
 
 def get_ctrfreq(nus):
     mid = float(len(nus)) / 2

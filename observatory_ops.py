@@ -6,6 +6,16 @@ def get_gains(scope, dec, g_zenith):
     """
     Compute elevation-dependent multiplicative receiver gain factor at a
     pulsar's meridian altitude
+
+    Parameters:
+    ----------
+    scope : telescope.Telescope object
+    dec : float
+          pulsar declination in fractional degrees
+    g_zenith : float or numpy.ndarray
+          beam-center, zenith multiplicative receiver gain(s) in K/Jy
+
+    Returns: gain (float or numpy.ndarray, depending on g_zenith type)
     """
     if abs(scope.lat - dec) >= 90. - scope.alt_lim[1]:
         # source never rises
@@ -70,3 +80,31 @@ def uptime(dec, obs_lat, horiz=0., epoch_days=30.):
     else:
         da = 2. * np.arccos((np.sin(horiz) / (np.cos(obs_lat) * np.cos(dec)))- np.tan(dec) * np.tan(obs_lat))
         return da * epoch_days * 86400. / (2. * np.pi)
+
+def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
+    """
+    Very rough estimate of source time above the horizon
+
+    Parameters:
+    t0 : float or numpy.ndarray
+         time above horizon in seconds for a Dec.=0 source
+    scope : telescope.Telescope object
+    psr_dec : float 
+              pulsar Dec. in fractional degrees
+    horiz : float
+            lower elevation limit of telescope in fractional degrees
+    cutoff : float
+             maximum available time in seconds (default 30 hrs)
+    """
+    if abs(psr_dec - scope.lat) >= 90. - horiz:
+        # source never rises
+        if isinstance(t0, (list, np.ndarray)): 
+            t_obs = np.zeros(len(t0))
+        elif isinstance(t0, (int, float)):
+            t_obs = 0.
+    elif abs(psr_dec + scope.lat) >= 90. + horiz:
+        # source never sets
+        t_obs = t0 * (2 * np.cos(np.radians(psr_dec)) ** -1) ** scope.timefac
+    else:
+        t_obs = t0 * (np.cos(np.radians(psr_dec)) ** -1) ** scope.timefac
+    return np.clip(t_obs, 0., cutoff)
