@@ -80,7 +80,7 @@ def calc_timing(pta,
                 
 def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                        gainmodel=None, gainexp=None, timefac=0.,
-                       optimize_freq=None):
+                       optimize_freq=None, vverbose=False):
     """
     Single pulsar TOA uncertainty calculator
 
@@ -186,7 +186,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                               nchan=len(nus),
                                               numax=get_ctrfreq(nus),
                                               numin=get_ctrfreq(nus),
-                                              vverbose=False)
+                                              vverbose=vverbose)
             sigma_tup = fop_inst.calc_single(nus)
             return p.name, scope.name, sigma_tup, scope_noise, {}
         else: # optimize observing frequency within band
