@@ -28,6 +28,8 @@ class OptimizeFrequency(object):
          Run in fractional bandwidth mode
     full_bandwidth: bool
          Enforce full bandwidth in calculations
+    min_bw: float
+         Minimum bandwidth (GHz) to consider in frequency optimization
     plot: bool
           Write optimizer grid plots
     plotdir: string
@@ -47,6 +49,7 @@ class OptimizeFrequency(object):
                  log_grid=True,
                  frac_bw=False,
                  full_bandwidth=False,
+                 min_bw=None,
                  plot=False,
                  plotdir=".",
                  levels=None,
@@ -64,6 +67,7 @@ class OptimizeFrequency(object):
         self.log_grid = log_grid
         self.frac_bw = frac_bw
         self.full_bandwidth = full_bandwidth
+        self.min_bw = min_bw
         self.ncpu = ncpu
         self.plot = plot
         if isinstance(plotdir, str):

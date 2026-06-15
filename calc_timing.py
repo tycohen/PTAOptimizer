@@ -184,8 +184,8 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                               gal_noise,
                                               scope_noise,
                                               nchan=len(nus),
-                                              numax=get_ctrfreq(nus),
-                                              numin=get_ctrfreq(nus),
+                                              numax=max(nus) + np.diff(nus)[0],
+                                              numin=min(nus),
                                               vverbose=vverbose)
             sigma_tup = fop_inst.calc_single(nus)
             return p.name, scope.name, sigma_tup, scope_noise, {}
@@ -200,6 +200,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                               verbose=False,
                                               nsteps=optimize_freq.nsteps,
                                               dnu=optimize_freq.dnu,
+                                              min_bw=optimize_freq.min_bw,
                                               log=optimize_freq.log_grid,
                                               levels=optimize_freq.levels,
                                               colors=optimize_freq.colors,
