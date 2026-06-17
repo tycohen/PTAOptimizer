@@ -32,7 +32,7 @@ class PTA(object):
         else:
             raise ValueError("No pulsar named {} in PTA".format(psr_name))
 
-    def sigma_best(self, exclude=[]):
+    def sigma_best(self, exclude=[], strip_str=None):
         """
         Get the best instrument for each pulsar
         and return list of tuples of (pulsar name, instrument, sigma_tot)
@@ -41,20 +41,24 @@ class PTA(object):
         ----------
         exclude : list
                   list of telescope name substrings to exclude
+        strip_str : string
+                  remove this string from instrument name results
         """
+        if strip_str is None:
+            strip_str = ""
         if not isinstance(exclude, list):
             raise TypeError("'exclude' must be a list of substrings not "
                             "{}".format(type(exclude)))
         best_instr_list = []
         for p in self.psrlist:
-            best_tup = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
+            best_tup = sorted([(p.name, k.replace(strip_str, ''), v['sigma_tot'])
                                for k, v in iter(p.sigmas.items())
                                if not any([e in k for e in exclude])],
                               key=lambda t: (t[2] < 0., t[2]))[0]
             best_instr_list.append(best_tup)
         return best_instr_list
 
-    def sigma_2best(self, exclude=[]):
+    def sigma_2best(self, exclude=[], strip_str=None):
         """
         Get the best and 2nd instrument for each pulsar
         and return list of tuples of (pulsar name, instrument, % diff)
@@ -64,13 +68,18 @@ class PTA(object):
         ----------
         exclude : list
                   list of telescope name substrings to exclude
+        strip_str : string
+                  remove this string from instrument name results
         """
+        if strip_str is None:
+            strip_str = ""
         if not isinstance(exclude, list):
             raise TypeError("'exclude' must be a list of substrings not "
                             "{}".format(type(exclude)))
         best_instr_list = []
         for p in self.psrlist:
-            sigmas_sorted = sorted([(p.name, k.replace('_logain', ''), v['sigma_tot'])
+            sigmas_sorted = sorted([(p.name, k.replace(strip_str, ''),
+                                     v['sigma_tot'])
                                     for k, v in iter(p.sigmas.items())
                                     if not any([e in k for e in exclude])],
                                    key=lambda t: (t[2] < 0., t[2]))
