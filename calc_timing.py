@@ -47,7 +47,7 @@ def calc_timing(pta,
             for p in pta.psrlist:
                 psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
                     p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
-                    gainmodel, gainexp, timefac, optimize_freq
+                    gainmodel, gainexp, timefac, optimize_freq, verbose
                 )
                 p.add_sigmas(instr_name, sigma_tup)
                 try:
