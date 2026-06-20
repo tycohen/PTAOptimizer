@@ -1,6 +1,7 @@
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
+from scipy.optimize import minimize
 
 def get_gains(scope, dec, g_zenith):
     """
@@ -108,3 +109,110 @@ def get_tobs(t0, scope, psr_dec, horiz=0., cutoff=1.08e5):
     else:
         t_obs = t0 * (np.cos(np.radians(psr_dec)) ** -1) ** scope.timefac
     return np.clip(t_obs, 0., cutoff)
+
+def shared_optimal_beams(pta, beam_fwhm, instr_key=None):
+    """
+    Return only the most inclusive beams that contain multiple pulsars
+    Brute force search
+
+    Parameters:
+    ----------
+    pta : pta.PTA object
+    beam_fwhm : float
+          Full-width at half-maximum of the beam
+    instr_key : str
+          optional instrument key, excludes pulsars not visible to instrument
+
+    Returns:
+    -------
+    psr_groups : list of lists of pulsar.Pulsar objects contained within each beam
+    """
+    import matplotlib.pyplot as plt
+    if instr_key is None:
+        psrlist = pta.psrlist
+    else:
+        psrlist = [p for p in pta.psrlist
+                   if p.sigmas[instr_key]["sigma_tot"] > 0.]
+    pta_psrs = np.array(psrlist)
+    groups = []
+    for i, thisp in enumerate(pta_psrs):
+        thisp_group = [i]
+        # start with beam centered on first src
+        beam_ra = thisp.ra
+        beam_dec = thisp.dec
+        beam_width = beam_fwhm # start searching FWHM away from first src
+        for j, otherp in enumerate(pta_psrs):
+            if i == j:
+                continue
+            if is_in_beam(beam_ra, beam_dec,
+                          otherp.ra, otherp.dec,
+                          beam_width):
+                thisp_group.append(j)
+                # center the beam btwn all sources
+                ra_list = [p.ra for p in pta_psrs[thisp_group]]
+                dec_list = [p.dec for p in pta_psrs[thisp_group]]
+                beam_ra, beam_dec = find_beam_center(ra_list, dec_list)
+                beam_width = beam_fwhm / 2. # now only search beam radius from ctr
+        thisp_set = set(thisp_group)
+        if len(thisp_set) == 1: #no groups, lonely pulsar
+            continue
+        for g in groups:
+            if thisp_set.issubset(set(g)):
+                break
+        else:
+            groups = [g for g in groups if not set(g).issubset(thisp_set)]
+            groups.append(thisp_group)
+    psr_groups = [pta_psrs[list(idx)] for idx in groups]
+    return psr_groups
+
+def find_beam_center(ra_list, dec_list):
+    """
+    Finds the RA, Dec that minimizes max angular separation 
+    to all sources in beam
+
+    Parameters:
+    ----------
+    ra_list: list or array of Right Ascension values in degrees
+    dec_list: list or array of Declination values in degrees
+
+    Returns:
+    -------
+    ra, dec of centered beam
+    """
+    # Convert input to SkyCoord
+    coords = SkyCoord(ra=ra_list*u.deg, dec=dec_list*u.deg, frame='icrs')
+
+    # Initial guess: mean of unit vectors projected back to sphere
+    x = np.cos(coords.ra.radian) * np.cos(coords.dec.radian)
+    y = np.sin(coords.ra.radian) * np.cos(coords.dec.radian)
+    z = np.sin(coords.dec.radian)
+    mean_vec = np.array([np.mean(x), np.mean(y), np.mean(z)])
+    mean_vec /= np.linalg.norm(mean_vec)
+
+    init_ra = np.degrees(np.arctan2(mean_vec[1], mean_vec[0])) % 360
+    init_dec = np.degrees(np.arcsin(mean_vec[2]))
+    initial_guess = [init_ra, init_dec]
+
+    # Objective function: maximum angular separation to all points
+    def max_separation(x):
+        ra, dec = x
+        if not (0 <= ra <= 360) or not (-90 <= dec <= 90):
+            return 1e6  # Large penalty for invalid values
+        trial_point = SkyCoord(ra=x[0]*u.deg, dec=x[1]*u.deg, frame='icrs')
+        separations = trial_point.separation(coords)
+        return np.max(separations.deg)
+
+    # Run minimization
+    result = minimize(
+        max_separation,
+        initial_guess,
+#        bounds=[(0, 360), (-90, 90)],
+        method='Powell'  # Good for non-smooth functions like max()
+    )
+
+    if not result.success:
+        raise RuntimeError("Could not find beam center. "
+                           "Minimization failed: " + result.message)
+
+    optimal_ra, optimal_dec = result.x
+    return optimal_ra, optimal_dec
