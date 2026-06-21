@@ -45,11 +45,11 @@ def calc_timing(pta,
     with threadpool_limits(1): # Cap BLAS/MKL threads
         if max_workers == 1: # dont spawn child processes, run in serial
             for p in pta.psrlist:
-                psrname, instr_name, sigma_tup, telnoise, optimum_dict = time_single_pulsar(
+                psrname, instr_name, sigma_dict, telnoise, optimum_dict = time_single_pulsar(
                     p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                     gainmodel, gainexp, timefac, optimize_freq, verbose
                 )
-                p.add_sigmas(instr_name, sigma_tup)
+                p.add_sigmas(instr_name, sigma_dict)
                 try:
                     p.optimum.update(optimum_dict)
                 except AttributeError:
@@ -69,9 +69,9 @@ def calc_timing(pta,
                 ))
 
             for fut in as_completed(futures):
-                psrname, instr_name, sigma_tup, telnoise, optimum_dict = fut.result()
+                psrname, instr_name, sigma_dict, telnoise, optimum_dict = fut.result()
                 p = pta.get_single_pulsar(psrname)
-                p.add_sigmas(instr_name, sigma_tup)
+                p.add_sigmas(instr_name, sigma_dict)
                 try:
                     p.optimum.update(optimum_dict)
                 except AttributeError:
@@ -144,7 +144,12 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                            scope_noise_init.get_gain(nus))
     if 0. in scope_noise_init.gain:
         # if any gains are zero, psr below at least 1 scopes horizon
-        return p.name, scope.name, (-2, -2, -2, -2, -2), scope_noise_init, {}
+        sigma_dict = {'sigma_tot' : -2,
+                      'sigma_white' : -2,
+                      'sigma_dm' : -2,
+                      'sigma_tel' : -2,
+                      'sigma_rn' : -2}
+        return p.name, scope.name, sigma_dict, scope_noise_init, {}
     else:
         if isinstance(timefac, np.ndarray):
             scope_noise_init.T = oops.get_tobs(scope_noise_init.get_T(nus),
@@ -187,8 +192,8 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                               numax=max(nus) + np.diff(nus)[0],
                                               numin=min(nus),
                                               vverbose=vverbose)
-            sigma_tup = fop_inst.calc_single(nus)
-            return p.name, scope.name, sigma_tup, scope_noise, {}
+            sigma_dict = fop_inst.calc_single(nus, retall=True)
+            return p.name, scope.name, sigma_dict, scope_noise, {}
         else: # optimize observing frequency within band
             fop_inst = fop.FrequencyOptimizer(pulsar_noise,
                                               gal_noise,
@@ -264,7 +269,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                                                   numax=max(nus_opt),
                                                   numin=min(nus_opt),
                                                   verbose=False)
-            sigma_tup_opt = fop_inst_opt.calc_single(nus_opt)
+            sigma_dict_opt = fop_inst_opt.calc_single(nus_opt, retall=True)
 
             if optimize_freq.plot:
                 plot_fname = "{}_{}.png".format(p.name,
@@ -275,7 +280,7 @@ def time_single_pulsar(p, nus, rxspecfile, scope_name, t_int, dec_lim, lat,
                               minimum="k*")
 
             return (p.name, scope.name + "_freqopt",
-                    sigma_tup_opt, scope_noise_opt, optimum)
+                    sigma_dict_opt, scope_noise_opt, optimum)
 
 def get_ctrfreq(nus):
     mid = float(len(nus)) / 2

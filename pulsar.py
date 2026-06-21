@@ -133,17 +133,20 @@ class Pulsar(object):
         n_pulses = t_int / self.period
         return self.sig_j_single / np.sqrt(n_pulses)            
 
-    def add_sigmas(self, instr_name, sigma_tup):
+    def add_sigmas(self, instr_name, sigma_dict):
         """instr_name : str
                         name of timing instrument
-        sigma_tup : tuple
-                        tuple of RMS components"""
+        sigma_dict : dict
+                        dictionary of RMS components"""
         keys = ['sigma_tot',
                 'sigma_white',
                 'sigma_dm',
                 'sigma_tel',
                 'sigma_rn']
-        self.sigmas.update({instr_name: dict(list(zip(keys, sigma_tup)))})
+        if not all([k in list(sigma_dict.keys()) for k in keys]):
+            keystr = ", ".join(keys)
+            raise KeyError("'sigma_dict' must contain the keys: {}".format(keystr))
+        self.sigmas.update({instr_name: sigma_dict})
 
     def get_instr_keys(self):
         return [k for k in self.sigmas]
