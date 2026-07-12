@@ -1551,6 +1551,16 @@ class OptimizeTime(object):
         on the feasible polytope that obey the budget. Supports
         white noise-only noise model 'wn' or white noise + red noise
         model 'wnrn'.
+
+        Returns:
+        -------
+        t_opts : (nsamp, Npulsar) numpy.ndarray
+                 optimal time vectors for each random start
+        f_opts : (nsamp,) numpy.ndarray
+                 objective optimum for each random start
+        t0s_proj : (nsamp, Npulsar) numpy.ndarray
+                 initial starting vector projected onto feasible polytope for
+                 each random start
         """
         valid_samplers = ("spiky", "uniform")
         valid_optimizers = ("trust-constr", "l-bfgs-b")
@@ -1637,7 +1647,7 @@ class OptimizeTime(object):
         """
         Heuristic local-optimality check:
         move +delta_t from j -> i (i gains time, j loses time), keeping sum fixed.
-        Returns: swap indices array, swap time vectors, delta F
+        Returns: swap indices array ([incr, decr]), swap time vectors, delta F
         """
         N = len(self.pta.psrlist)
 
