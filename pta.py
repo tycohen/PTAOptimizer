@@ -243,21 +243,22 @@ class PTA(object):
                               if any([FOOTSYMB_FMT.format(d["footsymb"]) in l
                                       for l in s])]
                              for s in data_split]
-            print(footlst_split)
             new_caption = r"\tablecaption{continued}"
             split_tabs = []
             for i, (d, ftl) in enumerate(zip(data_split, footlst_split)):
+                tabfoot_lines_cp = tabfoot_lines.copy()
                 if ftl:
-                    tabfoot_lines.insert(-1, "\n".join(ftl))
-                split_tabs.append("\n".join(["\n".join(tabhead_lines),
-                                             "\n".join(d),
-                                             "\n".join(tabfoot_lines)]))
-                table = "\n".join(split_tabs)
+                    tabfoot_lines_cp.insert(-1, "\n".join(ftl))
                 if i == 0: # 'Continued' caption after first sub-table
                     tabhead_lines.insert(0, r"\addtocounter{table}{-1}")
                     tabhead_lines = [new_caption if l == tablecaption else l
                                      for l in tabhead_lines]
-                    tabfoot_lines.remove(tablecomments)
+                if i > 0:
+                    tabfoot_lines_cp.remove(tablecomments)
+                split_tabs.append("\n".join(["\n".join(tabhead_lines),
+                                             "\n".join(d),
+                                             "\n".join(tabfoot_lines_cp)]))
+            table = "\n".join(split_tabs)
         else:
             if footnote_dict is not None:
                 tabfoot_lines.insert(-1, "\n".join(footlst))
