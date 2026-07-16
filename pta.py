@@ -1,4 +1,7 @@
 from os import path
+import string
+
+FOOTSYMB_FMT = r"$^{{\rm {}}}$"
 
 class PTA(object):
     """
@@ -125,7 +128,8 @@ class PTA(object):
                          split_row_idx=None,
                          longtable=False,
                          fontsize=r"scriptsize",
-                         comments_macro="table caption"):
+                         comments_macro="table caption",
+                         footnote_dict=None):
         """
         Make a publication-quality AASTex deluxetable
 
@@ -145,7 +149,7 @@ class PTA(object):
         fontsize : raw str
             latex named font size (no backslash)
         comments_macro : str
-            optional latex macro for inserting content into \tablecomments
+            optional custom latex macro for inserting content into \tablecomments
         """
         if not path.isdir(savedir):
             raise FileNotFoundError("'savedir' {} does not exist.".format(savedir))
@@ -205,9 +209,24 @@ class PTA(object):
             r"}",
             r"\startdata"
         ]
+        footbase = r"\tablenotetext{{{}}}{{\vspace{{-2ex}}{}}}"
+        if footnote_dict is None:
+            footnote_dict = {}
+            footlst = []; sortfoot = []
+        else:
+            footnote_dict = footnote_order(footnote_dict, psrs_incl, cols)
+            footitems = [k2 for k1 in footnote_dict.keys()
+                         for k2 in footnote_dict[k1].values()]
+            sortfoot = sorted(footitems,
+                              key=lambda d: len(d["footsymb"]) * 25 +\
+                              string.ascii_lowercase.index(d["footsymb"]))
+            footlst = [footbase.format(d["footsymb"], d["text"])
+                       for d in sortfoot]
         if longtable:
             tabhead_lines.insert(0, r"\startlongtable")
-        data = [" & ".join([apply_fmt(c["fmt"], getattr(p, c["attr"])) for c in cols]) \
+        data = [" & ".join([apply_foot(apply_fmt(c["fmt"], getattr(p, c["attr"])),
+                                       footnote_dict, p.name, c["attr"])
+                            for c in cols]) \
                 + ("\\\\" if i < npsr - 1 else "")
                 for i, p in enumerate(psrs_incl)]
         tablecomments = r"\tablecomments{{{}}}".format(comments_macro)
@@ -219,9 +238,17 @@ class PTA(object):
         if split_row_idx is not None: # create len(split_row_idx) separate tables
             data_split = [data[a:b] for a, b in zip([0] + split_row_idx,
                                                     split_row_idx + [None])]
+            footlst_split = [[footbase.format(d["footsymb"], d["text"])
+                              for d in sortfoot
+                              if any([FOOTSYMB_FMT.format(d["footsymb"]) in l
+                                      for l in s])]
+                             for s in data_split]
+            print(footlst_split)
             new_caption = r"\tablecaption{continued}"
             split_tabs = []
-            for i, d in enumerate(data_split):
+            for i, (d, ftl) in enumerate(zip(data_split, footlst_split)):
+                if ftl:
+                    tabfoot_lines.insert(-1, "\n".join(ftl))
                 split_tabs.append("\n".join(["\n".join(tabhead_lines),
                                              "\n".join(d),
                                              "\n".join(tabfoot_lines)]))
@@ -232,6 +259,8 @@ class PTA(object):
                                      for l in tabhead_lines]
                     tabfoot_lines.remove(tablecomments)
         else:
+            if footnote_dict is not None:
+                tabfoot_lines.insert(-1, "\n".join(footlst))
             table = "\n".join(["\n".join(tabhead_lines),
                                "\n".join(data),
                                "\n".join(tabfoot_lines)])
@@ -253,3 +282,37 @@ def apply_fmt(fmt, value):
         return fmt(value)
     return fmt.format(value)
     
+def footnote_order(footnote_dict, psrs_incl, cols):
+    """
+    Parameters:
+    ----------
+    footnote_dict : pulsar dict of attribute dict containing footnote text 
+                    for each attr that requires a footnote
+    psrs_incl : list of pulsar.Pulsar objects  to include in the table
+    cols : list of table column dictionaries
+
+    Returns:
+    -------
+    footnote_dict with 'footsymb' key,value added for each attr key
+    """
+    nfoot = len([k2 for k1 in footnote_dict.keys()
+                 for k2 in footnote_dict[k1].keys()])
+    letters = string.ascii_lowercase
+    footsymb = [letters[i % 25] * (i // 25 + 1) for i in range(nfoot)]
+    i = 0
+    for p in psrs_incl:
+        for c in cols:
+            try:
+                d = footnote_dict[p.name][c["attr"]]
+            except KeyError:
+                continue
+            d['footsymb'] = footsymb[i]
+            i += 1
+    return footnote_dict
+
+def apply_foot(valstr, footnote_dict, n, attr):
+    try:
+        symb = footnote_dict[n][attr]['footsymb']
+    except KeyError:
+        return valstr
+    return valstr + FOOTSYMB_FMT.format(symb)
