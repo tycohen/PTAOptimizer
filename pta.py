@@ -249,15 +249,18 @@ class PTA(object):
                 tabfoot_lines_cp = tabfoot_lines.copy()
                 if ftl:
                     tabfoot_lines_cp.insert(-1, "\n".join(ftl))
-                if i == 0: # 'Continued' caption after first sub-table
-                    tabhead_lines.insert(0, r"\addtocounter{table}{-1}")
+                # 'Continued' caption after first sub-table
+                if i > 0:
+                    tabhead_lines.insert(0, r"\addtocounter{table}{-1}")       
+                    tabfoot_lines_cp.remove(tablecomments)
                     tabhead_lines = [new_caption if l == tablecaption else l
                                      for l in tabhead_lines]
-                if i > 0:
-                    tabfoot_lines_cp.remove(tablecomments)
+                    
                 split_tabs.append("\n".join(["\n".join(tabhead_lines),
                                              "\n".join(d),
                                              "\n".join(tabfoot_lines_cp)]))
+                if i > 0:
+                    tabhead_lines.pop(0)
             table = "\n".join(split_tabs)
         else:
             if footnote_dict is not None:
