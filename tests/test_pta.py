@@ -17,8 +17,12 @@ class Test_sigma_best(unittest.TestCase):
         self.psr = Pulsar(name="pulsar")
         for i, instr_name in enumerate(["1", "2", "3"]):
             # add only the total noise, set other components to None
-            self.psr.add_sigmas(instr_name, (self.sigmadict_test[i],
-                                             None, None, None, None))
+            sigdict = {'sigma_tot' : self.sigmadict_test[i],
+                       'sigma_white' : None,
+                       'sigma_dm' : None,
+                       'sigma_tel' : None,
+                       'sigma_rn' : None}
+            self.psr.add_sigmas(instr_name, sigdict)
         self.pta = PTA(psrlist=[self.psr])
 
     def test_sigma_best_picks_smallest_positive_sigma(self):
