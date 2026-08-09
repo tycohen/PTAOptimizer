@@ -5,6 +5,7 @@ import numpy as np
 import unittest
 import pickle
 
+@unittest.skip("NG15yr.pta no longer included in repo. Will need to have a test object of PTA and Pulsars, run calc_timing on database of instruments/specs, then run this test.")
 class Test_sigma_tot_eq_quadsum(unittest.TestCase):
     """
     Parameterized test to check that for all visible pulsars, with all receiver
