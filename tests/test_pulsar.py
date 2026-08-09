@@ -51,12 +51,13 @@ class test_Pulsar_add_sigmas(unittest.TestCase):
                           uscale=5.133881283010092)
 
     def test_add_sigmas_value_order(self):
-        inject_sigmas = (0.1, 0.05, 0.02, 0.01, 0.04)
+        sigmas_tup = (0.1, 0.05, 0.02, 0.01, 0.04)
         ordered_keys = ['sigma_tot',
                         'sigma_white',
                         'sigma_dm',
                         'sigma_tel',
                         'sigma_rn']
+        inject_sigmas = {k : s for k,s in zip(ordered_keys, sigmas_tup)}
         self.psr.add_sigmas("test_instr", inject_sigmas)
         self.assertTrue([self.psr.sigmas["test_instr"][k] == s
                          for k,s in zip(ordered_keys, inject_sigmas)])
