@@ -1,226 +1,163 @@
 
-# AO Scheduling Taskforce &sigma;TOA Estimates
+# PTAOptimizer
 
+A python package for optimizing Pulsar Timing Array observations
 
-Code used to aggregate pulsar parameters and estimate the TOA uncertainty referenced to the infinite frequency TOA (as described in [Lam et al. 2018](https://ui.adsabs.harvard.edu/abs/2018ApJ...861...12L/abstract)) for NANOGrav 15-yr pulsars with a variety of telescopes including:
-* Arecibo 430 & L-band
-* Arecibo L-band and S-band
-* GBT 800 & L-band
-* GBT L-band & VLA S-band
-* CHIME & GBT L-band
-* CHIME & GBT UWBR
+---
+---
+## The Pulsar class (`pulsar.Pulsar`)
 
-
-NG15yr_totRMS.txt contains the total RMS for each pulsar at each telescope, assuming 30 min integration time per band per epoch, except at CHIME where the integration time is dec-dependent and at most 30 hours / epoch. Pulsars not visible to CHIME have their CHIME `sigmas` set to -2. Total noise can be scaled to different integration time using the individual noise components. See **Example Usage** to get individual noise components.
-
-## Summary
-
-Best telescope (excluding Arecibo and GBT UWBR) for each pulsar based on RMS estimates taking into consideration declination-limits.
-
-|  Pulsar |   Best Telescope(s)     |Total RMS (&mu;s)|   2nd Best Telescope(s)     |Total RMS (&mu;s)|
-|---------|-------------------------|-----------------|-------------------------|-----------------|
-|B1855+09 | CHIME-GBTL | 0.4579 | GBT_Rcvr_800-Rcvr_1_2 | 0.6280|
-|B1937+21 | GBT_Rcvr_1_2_VLAS | 0.1365 | GBT_Rcvr_800-Rcvr_1_2 | 0.3972|
-|B1953+29 | GBT_Rcvr_800-Rcvr_1_2 | 3.4353 | GBT_Rcvr_1_2_VLAS | 5.6623|
-|J0023+0923 | CHIME-GBTL | 1.4126 | GBT_Rcvr_800-Rcvr_1_2 | 2.2837|
-|J0030+0451 | CHIME-GBTL | 0.8110 | GBT_Rcvr_800-Rcvr_1_2 | 1.2065|
-|J0125-2327 | GBT_Rcvr_1_2_VLAS | 0.2866 | GBT_Rcvr_800-Rcvr_1_2 | 0.3791|
-|J0154+1833 | CHIME-GBTL | 1.3340 | GBT_Rcvr_800-Rcvr_1_2 | 2.8961|
-|J0340+4130 | GBT_Rcvr_800-Rcvr_1_2 | 2.0188 | CHIME-GBTL | 2.6424|
-|J0406+3039 | GBT_Rcvr_800-Rcvr_1_2 | 1.2742 | CHIME-GBTL | 1.4583|
-|J0509+0856 | CHIME-GBTL | 1.9387 | GBT_Rcvr_800-Rcvr_1_2 | 2.7891|
-|J0557+1551 | GBT_Rcvr_1_2_VLAS | 5.3571 | CHIME-GBTL | 9.4253|
-|J0605+3757 | CHIME-GBTL | 1.1552 | GBT_Rcvr_800-Rcvr_1_2 | 2.0358|
-|J0610-2100 | GBT_Rcvr_800-Rcvr_1_2 | 1.6001 | GBT_Rcvr_1_2_VLAS | 2.2534|
-|J0613-0200 | GBT_Rcvr_800-Rcvr_1_2 | 0.3512 | CHIME-GBTL | 0.5378|
-|J0614-3329 | GBT_Rcvr_800-Rcvr_1_2 | 0.6971 | GBT_Rcvr_1_2_VLAS | 0.9803|
-|J0636+5128 | CHIME-GBTL | 0.3880 | GBT_Rcvr_800-Rcvr_1_2 | 0.9103|
-|J0645+5158 | CHIME-GBTL | 1.4743 | GBT_Rcvr_800-Rcvr_1_2 | 2.9557|
-|J0709+0458 | CHIME-GBTL | 8.7690 | GBT_Rcvr_1_2_VLAS | 12.1082|
-|J0732+2314 | CHIME-GBTL | 2.0457 | GBT_Rcvr_800-Rcvr_1_2 | 2.7689|
-|J0740+6620 | CHIME-GBTL | 0.5070 | GBT_Rcvr_800-Rcvr_1_2 | 1.1347|
-|J0751+1807 | CHIME-GBTL | 0.8289 | GBT_Rcvr_800-Rcvr_1_2 | 1.1757|
-|J0931-1902 | CHIME-GBTL | 1.1971 | GBT_Rcvr_800-Rcvr_1_2 | 1.5985|
-|J1012+5307 | CHIME-GBTL | 0.2555 | GBT_Rcvr_800-Rcvr_1_2 | 0.5858|
-|J1012-4235 | GBT_Rcvr_1_2_VLAS | 1.1461 | GBT_Rcvr_800-Rcvr_1_2 | 1.6197|
-|J1022+1001 | CHIME-GBTL | 0.5194 | GBT_Rcvr_800-Rcvr_1_2 | 0.6706|
-|J1024-0719 | CHIME-GBTL | 0.6790 | GBT_Rcvr_800-Rcvr_1_2 | 0.9731|
-|J1125+7819 | CHIME-GBTL | 0.3854 | GBT_Rcvr_800-Rcvr_1_2 | 1.5188|
-|J1312+0051 | CHIME-GBTL | 2.5590 | GBT_Rcvr_800-Rcvr_1_2 | 3.7960|
-|J1327+3423 | CHIME-GBTL | 7.5790 | GBT_Rcvr_800-Rcvr_1_2 | 13.8936|
-|J1453+1902 | CHIME-GBTL | 3.6239 | GBT_Rcvr_800-Rcvr_1_2 | 5.6557|
-|J1455-3330 | GBT_Rcvr_800-Rcvr_1_2 | 2.4215 | GBT_Rcvr_1_2_VLAS | 3.8961|
-|J1600-3053 | GBT_Rcvr_1_2_VLAS | 0.2576 | GBT_Rcvr_800-Rcvr_1_2 | 0.3965|
-|J1614-2230 | GBT_Rcvr_800-Rcvr_1_2 | 0.9900 | GBT_Rcvr_1_2_VLAS | 1.4292|
-|J1630+3550 | CHIME-GBTL | 3.6222 | GBT_Rcvr_800-Rcvr_1_2 | 9.3529|
-|J1630+3734 | CHIME-GBTL | 1.0158 | GBT_Rcvr_800-Rcvr_1_2 | 1.9963|
-|J1640+2224 | CHIME-GBTL | 0.7894 | GBT_Rcvr_800-Rcvr_1_2 | 1.4290|
-|J1643-1224 | GBT_Rcvr_800-Rcvr_1_2 | 0.5250 | GBT_Rcvr_1_2_VLAS | 0.7314|
-|J1705-1903 | GBT_Rcvr_1_2_VLAS | 0.5512 | GBT_Rcvr_800-Rcvr_1_2 | 0.6364|
-|J1713+0747 | CHIME-GBTL | 0.1602 | GBT_Rcvr_1_2_VLAS | 0.1969|
-|J1719-1438 | CHIME-GBTL | 1.4084 | GBT_Rcvr_800-Rcvr_1_2 | 1.8039|
-|J1730-2304 | GBT_Rcvr_800-Rcvr_1_2 | 0.8273 | GBT_Rcvr_1_2_VLAS | 1.1629|
-|J1738+0333 | GBT_Rcvr_1_2_VLAS | 1.7060 | CHIME-GBTL | 1.7663|
-|J1741+1351 | CHIME-GBTL | 1.6546 | GBT_Rcvr_800-Rcvr_1_2 | 2.9330|
-|J1744-1134 | CHIME-GBTL | 0.3753 | GBT_Rcvr_800-Rcvr_1_2 | 0.5293|
-|J1745+1017 | CHIME-GBTL | 0.7703 | GBT_Rcvr_800-Rcvr_1_2 | 1.0975|
-|J1747-4036 | GBT_Rcvr_1_2_VLAS | 2.7376 | GBT_Rcvr_800-Rcvr_1_2 | 8.1213|
-|J1751-2857 | GBT_Rcvr_800-Rcvr_1_2 | 2.3538 | GBT_Rcvr_1_2_VLAS | 3.3697|
-|J1802-2124 | GBT_Rcvr_1_2_VLAS | 7.9382 | GBT_Rcvr_800-Rcvr_1_2 | 38.9509|
-|J1803+1358 | GBT_Rcvr_800-Rcvr_1_2 | 1.6802 | CHIME-GBTL | 4.0567|
-|J1811-2405 | GBT_Rcvr_800-Rcvr_1_2 | 1.5610 | GBT_Rcvr_1_2_VLAS | 1.6729|
-|J1832-0836 | CHIME-GBTL | 0.7827 | GBT_Rcvr_800-Rcvr_1_2 | 1.0559|
-|J1843-1113 | GBT_Rcvr_800-Rcvr_1_2 | 1.0656 | GBT_Rcvr_1_2_VLAS | 1.3051|
-|J1853+1303 | CHIME-GBTL | 1.2095 | GBT_Rcvr_800-Rcvr_1_2 | 1.9298|
-|J1903+0327 | GBT_Rcvr_1_2_VLAS | 48.3718 | CHIME-GBTL | 245.6239|
-|J1909-3744 | GBT_Rcvr_800-Rcvr_1_2 | 0.3791 | GBT_Rcvr_1_2_VLAS | 0.6362|
-|J1910+1256 | CHIME-GBTL | 1.5494 | GBT_Rcvr_800-Rcvr_1_2 | 2.3068|
-|J1911+1347 | CHIME-GBTL | 0.9963 | GBT_Rcvr_800-Rcvr_1_2 | 1.4606|
-|J1918-0642 | CHIME-GBTL | 0.9180 | GBT_Rcvr_800-Rcvr_1_2 | 1.3219|
-|J1923+2515 | CHIME-GBTL | 2.0951 | GBT_Rcvr_800-Rcvr_1_2 | 3.4809|
-|J1944+0907 | CHIME-GBTL | 1.6993 | GBT_Rcvr_800-Rcvr_1_2 | 2.7582|
-|J1946+3417 | GBT_Rcvr_800-Rcvr_1_2 | 1.5064 | GBT_Rcvr_1_2_VLAS | 1.7415|
-|J2010-1323 | CHIME-GBTL | 0.7913 | GBT_Rcvr_800-Rcvr_1_2 | 1.1157|
-|J2017+0603 | GBT_Rcvr_1_2_VLAS | 1.6264 | CHIME-GBTL | 2.0987|
-|J2022+2534 | CHIME-GBTL | 1.0419 | GBT_Rcvr_800-Rcvr_1_2 | 1.1488|
-|J2033+1734 | CHIME-GBTL | 2.9154 | GBT_Rcvr_800-Rcvr_1_2 | 5.2802|
-|J2039-3616 | GBT_Rcvr_800-Rcvr_1_2 | 1.4707 | GBT_Rcvr_1_2_VLAS | 1.7814|
-|J2043+1711 | CHIME-GBTL | 1.3399 | GBT_Rcvr_800-Rcvr_1_2 | 2.2708|
-|J2124-3358 | GBT_Rcvr_800-Rcvr_1_2 | 1.0778 | GBT_Rcvr_1_2_VLAS | 1.2549|
-|J2145-0750 | CHIME-GBTL | 0.6875 | GBT_Rcvr_800-Rcvr_1_2 | 1.0324|
-|J2150-0326 | CHIME-GBTL | 1.0480 | GBT_Rcvr_800-Rcvr_1_2 | 1.6443|
-|J2214+3000 | GBT_Rcvr_1_2_VLAS | 2.0539 | CHIME-GBTL | 2.4623|
-|J2229+2643 | CHIME-GBTL | 1.2753 | GBT_Rcvr_800-Rcvr_1_2 | 2.6486|
-|J2234+0611 | CHIME-GBTL | 1.3866 | GBT_Rcvr_800-Rcvr_1_2 | 2.0389|
-|J2234+0944 | CHIME-GBTL | 1.1274 | GBT_Rcvr_1_2_VLAS | 1.5500|
-|J2302+4442 | CHIME-GBTL | 1.0490 | GBT_Rcvr_800-Rcvr_1_2 | 2.1463|
-|J2317+1439 | CHIME-GBTL | 0.7490 | GBT_Rcvr_800-Rcvr_1_2 | 1.5689|
-|J2322+2057 | CHIME-GBTL | 2.5864 | GBT_Rcvr_800-Rcvr_1_2 | 4.3082|
-
-
-## 15yr_psrs.txt
-
-Contains the parameters of each 15yr pulsar. J0437 not included b/c only visible with VLA.
-
-### Columns
-
-* name
-* period (s)
-* DM (pc cm^-3)
-* DEC: declination (deg)
-* dtd: scintillation timescale from NE2001 (s)
-* dnud: scintillation bandwidth from NE2001 (GHz)
-* taud: scattering timescale from NE2001 (us)
-* dist: DM distance from NE2001 (kpc)
-* w50: FWHM of the L-band template (us)
-* weff: effective width of the L-band template (us)
-* uscale: scales intensity across pulse phase
-* S_1000: flux density at 1 GHz (mJy)
-* spindex: spectral index computed from log(flux ratio)/log(freq ratio)
-using 800/1400 for GBT pulsars, 430/1400 for AO when available, otherwise
-1400/2000. Cutoff at zero
-* sig_jitter: single pulse RMS jitter (us) from [Lam et al. 2019](https://ui.adsabs.harvard.edu/abs/2019ApJ...872..193L/abstract) or 0.63 * W50 if not in 12.5-yr (from Fig. 7 of same paper) 
-
-
-## The Pulsar class
-
-
-Class to store an individual 15-yr pulsar
+Class to store individual pulsar attributes, TOA uncertainties, and optimization results
 
 ### Attributes: 
 
-* `name` : string
+* `name` : `str`
 
 pulsar name
-* `period` : float
+* `period` : `float`
 
 pulse period in seconds
-* `dm` : float
+* `dm` : `float`
 
 dispersion measure in pc cm^-3	   
-* `dec` : float
+* `dec` : `float`
 
 declination in degrees
-* `dtd` : float
+* `ra` : `float`
+
+right ascension in degrees
+* `dtd` : `float`
 
 scintillation timescale in seconds
-* `dnud` : float
+* `dnud` : `float`
 
 scintillation bandwidth in GHz
-* `taud` : float
+* `taud` : `float`
 
 scattering timescale in us
-* `dist` : float
+* `dist` : `float`
 
-DM distance in kpc	    
-* `w50` : float
+Earth-pulsar distance in kpc	    
+* `w50` : `float`
 
-FWHM of L-band pulse profile in us
-* `weff` : float
+full-width at half-maximum of pulse profile in us
+* `weff` : `float`
 
-Effective width of the L-band profile in us
-* `uscale` : float
+Effective width of pulse profile in us
+* `uscale` : `float`
 
 scaling factor to distribute intensity across
                 pulse profile
-* `s_1000` : float
+* `s_1000` : `float`
 
 flux density at 1 GHz in mJy
-* `spindex` : float
+* `spindex` : `float`
 
 spectral index
-* `sig_j_single` : float
+* `sig_j_single` : `float`
 
 single-pulse RMS jitter in us
-* `sigmas` : dict
+* `template` : `numpy.ndarray` (optional)
+
+template used to measure profile parameters
+* `parfile` : str (optional)
+
+parfile contents
+* `sigmas` : `dict`
 
 dictionary of dictionaries of RMS components
                 for each instrument
+* `telescope_noise` : `dict` (optional)
 
+dictionary of FrequencyOptimizer.TelescopeNoise objects
+                for each instrument
+* `optimum` : `dict` (optional)
+
+dictionary of optimized parameters for each instrument
+* `t_int` : `dict` (optional)
+
+dictionary of integration times for each instrument.
+Use to set per-pulsar integration times. Will override integration time
+arguments to `calc_timing.calc_timing` or receiver specification files.
+* `redamp` : `float` (optional)
+
+dimensionless strain pulsar red noise amplitude.
+If not explicitly set, will be assumed to be zero.
+* `redgamma` : `float` (optional)
+
+positive pulsar red noise timing residual power spectrum
+spectral index. If not explicitly set, will be assumed to be zero.
+
+### Properties
+
+* `redalpha(self)`
+
+return negative strain spectral index converted from `redgamma`
 
 ### Methods
 
+---
 `sigma_jitter(self, t_int)`
 
 Return intrinsic jitter noise (in us)
 for given integration time in seconds
 
-`add_sigmas(self, instr_name, sigma_tup)`
+---
+`add_sigmas(self, instr_name, sigma_dict)`
 
-instr_name : str
+Add a dictionary of sigmas to self.sigmas under key `instr_name`
+
+<ins>Parameters</ins>
+
+`instr_name` : `str`
 
 name of timing instrument
 
-sigma_tup : tuple
+`sigma_dict` : `dict`
 
-tuple of RMS components
+dictionary of RMS components containing (at least) keys
+`'sigma_tot', 'sigma_white', 'sigma_dm', 'sigma_tel', 'sigma_rn'`
 
 `get_instr_keys(self)`
 
 returns instrument key names for sigmas dict
 
+---
+`detected(self, only=[])`
 
-## The PTA class
+Is the pulsar detected with every instrument in `self.sigmas`?
+
+<ins>Parameters</ins>
+
+`only` : `list`
+
+subset of instruments to query
+
+---
+---
+## The PTA class (`pta.PTA`)
 
 
-Class to store timed pulsars
+Class to store pulsar timing array attributes and constituent pulsars
 
 ### Attributes: 
 
-* `name` : string (optional)
+* `name` : `str` (optional)
 
 PTA name
 * `psrlist` : list
 
-list of pulsar.Pulsar objects
+list of `pulsar.Pulsar` objects
 
 
 ### Methods
 
+---
 `get_single_pulsar(self, psr_name)`
 
-return pulsar.Pulsar object whose name matches 'psr_name'
+return `pulsar.Pulsar` object whose name matches `psr_name`
 
+---
 `sigma_best(self, exclude=[])`
 
 Get the best instrument for each pulsar
@@ -232,39 +169,379 @@ and return list of tuples of (pulsar name, instrument, sigma_tot)
 
 list of telescope name substrings to exclude when sorting RMS's
 
-
-
-
+---
 `write_to_text(self, filename)`
 
 Write total RMS for each pulsar at each instrument to file
 
+---
+`write_2best_to_markdown(self, filename, exclude=[])`
 
-## Example Usage
+Write each pulsar's best two instrument options and total RMS for each to a markdown table
 
-To get a particular pulsar's noise estimates at a particular telescope:
+---
+`make_deluxetable(self, exclude_names=[], save=True, savedir=".", split_row_idx=None,
+longtable=False,fontsize=r"scriptsize",comments_macro="table caption",footnote_dict=None)`
 
-```
-import cPickle
-with open('NG15yr.pta', 'rb') as f:
-    pta = cPickle.load(f)
-j1713 = pta.get_single_pulsar("J1713+0747")
-print(j1713.get_instr_keys()) # get keys for sigmas dict
-print(j1713.sigmas["AO_430_Lwide_logain"])
-```
+Generate a publication-quality AASTex `deluxetable`
 
-To see which non-Arecibo telescope is best for each pulsar
+<ins>Parameters</ins>
 
-```
-import cPickle
-with open('NG15yr.pta', 'rb') as f:
-    pta = cPickle.load(f)
-print(pta.best_sigma(exclude=["AO"]))
-```
+`exclude_names` : `list`
 
-## Testing
-To run all integration and unit tests, run
+exclude these pulsars from the table
+
+`save` : `bool`
+
+save to file with name `self.name + 'psr_params.tex'`
+
+`savedir` : `string`
+
+path to save directory
+
+`split_row_idx` : `list` or `None`
+
+optional list of indices to the left of which to split the table
+vertically, creating `len(split_row_idx)` separate tables in the same file
+
+`longtable` : `bool`
+
+adds a `\startlongtable` before table environment
+
+`fontsize` : `raw str`
+
+latex named font size (no backslash)
+
+`comments_macro` : `str`
+
+optional custom latex macro for inserting content into `\tablecomments`
+
+----
+----
+## `calc_timing` module
+
+Time one or all pulsars with a particular instrument
+
+---
+`calc_timing(pta, nus, rxspecfile=None, scope_name=None, t_int=None, dec_lim=None, lat=None, gainmodel=None, gainexp=None, timefac=0., optimize_freq=None, verbose=False, max_workers=1):`
+
+Compute TOA uncertainties for each pulsar in a whole PTA with a single instrument or instrument combination. Modifies `PTA` instance in-place, by updating `sigmas` dict for each pulsar.
+
+<ins>Parameters</ins>
+
+`pta` : `pta.PTA` instance
+
+`nus` : `numpy.ndarray`
+
+evenly-spaced, monotinically increasing array of observing frequency subbands (GHz) at which to calculate frequency-dependent timing effects
+
+`rxspecfile` : `string`
+
+path to a receiver specifications file containing a header
 ```
-python -m pytest -vv
+#freq	Trx	G	eps
 ```
-from the base directory.
+and four tab-separated columns of observing frequencies (GHz), receiver temperature (K), multiplicative gain (K / Jy), and fractional polarization-calibration gain error
+
+`scope_name` : `string` or `None`
+
+optional telescope name used as instrument key. If `None`, uses basename of `rxspecfile`.
+
+`t_int` : `float` or `None`
+
+PTA-wide integration time (s) per subband. If `None`, each `pulsar` in `pta.psrlist`
+must have the `t_int` attr set to a dictionary containing a key that matches `rxspecfile` or `scope_name`.
+
+`dec_lim` : `tuple`
+
+tuple of telescope declination limits (degrees) in order `(max, min)`
+
+`lat` : `float`
+
+telescope latitude (degrees)
+
+`gainmodel` : `string` or `None`
+
+optional elevation-dependent telescope gain, options are `'exp'` or `'cos'`
+
+`gainexp` : `numpy.ndarray` or `None`
+
+exponent for `'cos'` gain model. If array, must have length `len(nus)`. Can acts as a flag to turn on elevation-dependent gain for specific subbands
+
+`timefac` : `numpy.ndarray` or `None`
+
+optional binary integer array of length `len(nus)`, acts as a flag to turn on elevation-dependent integration time for specific subbands
+
+`optimize_freq` : `optimize.OptimizeFrequency` instance or `None`
+
+arguments to pass to `frequencyoptimizer.FrequencyOptimizer`. If set, will compute the TOA uncertainty in the subband that minimizes `'sigma_tot'`, stored under the key
+`scope_name + '_freqopt'`.
+
+`verbose` : `bool`
+
+print sigma computation and results to stdout
+
+`max_workers` : `int` or `None`
+
+number of parallel forks over which to distribute pulsars for computation. Must not exceed number of CPUs - 2. Cannot simultaneously parallelize frequency-optimization (`optimize.OptimizeFrequency.ncpu`).
+
+---
+---
+## The OptimizeFrequency class (`optimize.OptimizeFrequency`)
+
+container for observing frequency-optimization arguments to pass to `frequencyoptimizer.FrequencyOptimizer`
+
+### Attributes
+
+* `nsteps`: `int`
+
+Number of steps in the grid to run when `log_grid = True`
+* `dnu` : `float`
+
+Delta nu, search grid frequency spacing when `log_grid = False`
+* `log_grid` : `bool`
+
+Use a log-space grid of center frequencies and bandwidths
+* `frac_bw` : `bool`
+
+Run in fractional bandwidth mode
+* `full_bandwidth` : `bool`
+
+Enforce full bandwidth in calculations
+* `min_bw`: `float`
+
+Minimum bandwidth (GHz) to consider in frequency optimization
+* `plot`: `bool`
+
+Write optimizer grid plots
+* `plotdir`: `string`
+
+Directory in which to write plots
+* `levels` : `numpy.ndarray`
+
+Array of contour levels for plotting
+* `colors` : `list`
+
+List of contour colors for plotting
+* `lws` : `list`
+
+List of contour linewidths for plotting
+* `ncpu` : `int`
+
+Number of cpus to use for parallel computing. Cannot mix with pulsar-parallelization (`calc_timing(max_workers>1)`)
+
+---
+---
+## The OptimizeTime class (`optimize.OptimizeTime`)
+
+Compute the optimal per-pulsar integration time that maximizes sensitivity to the gravitational wave background.
+
+### Attributes
+
+* `pta` : `pta.PTA instance`
+
+`pta.psrlist` must not be mutated, instance attribute will still point to original `PTA` list
+* `nus` : `numpy.ndarray`
+
+evenly-spaced array of observing frequency subbands (GHz)
+* rxspecfile : `string`
+
+path to receiver specifications file (see `calc_timing` module)
+
+* `dec_lim` : `tuple`
+
+`(max, min)` telescope declination limits (degress)
+
+* `lat` : `float`
+
+telescope latitude (degrees)
+* `t_int0` : `numpy.ndarray` or `None`
+
+initial guess, per-pulsar integration times (s). If `None`, assumes budget distributed equally.
+* `t_int_min` : `float`
+
+minimum integration time (s). Default is 60 s.
+* `t_int_maxtot` : `float`
+
+total time budget per epoch (s). Default is 1 month.
+* `epoch_days` : `float`
+
+duration of an observing epoch (days). Default is 30 days.
+* `timefac` : `numpy.ndarray` or `None`
+
+binary array of flags to turn on freq-dependent `t_int`
+* `gainmodel` : `string`
+
+telescope elevation-dependent gain model ('cos', 'exp')
+* `gainexp` : `float` or `numpy.ndarray`
+
+exponent for 'cos' gain model
+* `optimize_freq` : `optimize.OptimizeFrequency` or `None`
+
+freq optimization parameters
+* `timespan_yr` : `float`
+
+PTA data duration (years, assumed common across pulsars)
+* `cadence` : `int`
+
+number of observations per year
+
+* `n_gw_freq` : `int`
+
+number of GW frequencies at which to estimate power spectra. Default = 400.
+
+* `gwb_strainamp` : `float`
+
+GWB dimensionless strain amplitude (default=`2.4e-15`, NANOGrav 15-year Bayesian posterior)
+* `gwb_spindex` : `float`
+
+GWB dimensionless strain spectral index (default=-2/3, ensemble of circular SMBHB)
+* `max_workers` : `int`
+
+maximum parallel forks when computing PTA sigmas
+
+### Methods
+
+---
+`set_tint_from_grid(self, n_levels, log=False)`
+
+Set up resolution of sigmas lookup table. Set Pulsar `t_int` dicts with keys `"self.instr_name + _tinti"` where i is from 0 to `n_levels` based on a grid of integration times. Resets `Pulsar` `sigmas`, `telescope_noise`, `optimum` and `t_int` dicts
+
+---
+`fill_tint_lookup_table(self)`
+
+Compute `sigmas` dict for each integration time set using `self.set_tint_from_grid`
+
+---
+`sigma_interpolator(self, pulsar)`
+
+return scipy.interpolate.PchipInterpolator of sigma_tot(tint) for a single pulsar
+
+---
+`interp_sigma(self, pulsar, tint_find)`
+
+evaluate interpolated sigma at `tint_find`
+
+---
+`evaluate_snr(self, psrdict, t_vec)`
+
+Compute the GWB S/N for updated vector of integration times using `calc_timing.calc_timing`
+
+---
+`evaluate_snr_from_lut(self, psrdict, t_vec)`
+
+Compute the GWB S/N for updated vector of integration times
+using sigma lookup table instead of `calc_timing`
+
+---
+`maximize_snr_trust_constr(self, noisemodel="wn", t0=None, maxiter=500, init_trustrad=1.0, init_constrpenalty=1.0, gtol=1e-6, xtol=1e-10, barrier_tol=1e-10, obj_scale="equal", verbose=0, return_history=False)`
+
+Maximize GWB S/N squared using Scipy trust-constr algorithm. 
+
+<ins>Parameters</ins>
+
+`noisemodel` : `string`
+
+Pulsar residual power spectrum model. Options are `'wn'`, which neglects pulsar intrinsic red noise and GWB noise or `'wnrn'` which includes pulsar and GWB red noise. Default is `'wn'`.
+
+`t0` : `numpy.ndarray` or `None`
+
+optional initial guess (N,). If provided, will be projected to the feasible set {bounds + budget equality}. Default is equally-distributed time.
+
+`maxiter` : `int`
+
+scipy trust-constr maximum number of algorithm iterations
+
+`init_trustrad` : `float`
+
+scipy trust-constr initial radius of trust region for 2nd-order approximation of objective
+
+`init_constrpenalty` : `float`
+
+scipy trust-constr initial value of dynamic penalty for violating constraints
+
+`gtol` : `float`
+
+scipy trust-constr tolerance for infinity norm of Lagrangian gradient
+
+`xtol` : `float`
+
+scipy trust-constr tolerance for change in trust radius
+
+`barrier_tol` : `float`
+
+scipy trust-constr tolerance for inequality constraint barrier parameter
+
+`obj_scale` : `'equal'`, `float` or `None`
+
+optimize a scaled objective instead of the GWB S/N squared. Default is `'equal'`, the GWB S/N squared of equally-distributed time
+
+`return_history` : `bool`
+
+If `True`, log t, F, ||proj grad||_inf (approx) at each iteration in `info`
+
+<ins>Returns</ins>
+
+`t_star` : `(len(pta.psrlist),) numpy.ndarray`
+
+optimal integration time (s) vector
+
+`F_star` : `float`
+
+value of the un-scaled objective function at the optimum (GWB S/N squared)
+
+`info` : `dict`
+
+dictionary of final `scipy.minimize` results, violations at termination, and optionally per-iteration evaluations (`return_history=True`)
+
+---
+`random_multistart_optimizer(self, nsamp=100, maxiter=500, spiky_delta_t=3600., init_trustrad=1e4, init_trustconstrpen=1e3, trustconstr_gtol=1e-8, trustcontrs_xtol=1e-8, verbose=False, vverbose=False, optimizer="trust-constr", sample_type="uniform", noisemodel="wn")`
+
+An optimal solution stability diagnostic to test sensitivity to optimizer
+initial conditions. Run nsamp gradient optimizers with randomly sampled
+initial time vectors either 'spiky' (allocated to one pulsar near it's upper bound)
+or 'uniform' on the feasible polytope that obey the budget.
+Supports white noise-only noise model `'wn'` or white noise + red noise
+model `'wnrn'`.
+
+<ins>Returns</ins>
+
+t_opts : `(nsamp, len(pta.psrlist)) numpy.ndarray`
+
+optimal time vectors for each random start optimizer
+
+f_opts : `(nsamp,) numpy.ndarray`
+
+objective maxima for each random start optimizer
+
+t0s_proj : `(nsamp, len(pta.psrlist)) numpy.ndarray`
+
+feasible initial starting vectors for each random start optimizer
+
+---
+`random_timeswap_perturbation(self, t_opt, nswaps=100, noisemodel="wn", F_opt=None, delta_t=3600.0, adaptive_delta=False, verbose=False, tol=1e-10)`
+
+Heuristic local-optimality check:
+
+move +delta_t from j -> i (i gains time, j loses time), keeping sum fixed.
+
+<ins>Returns</ins>
+
+swap indices array ([incr, decr]), swap time vectors, delta F
+
+---
+`kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget, tol=1e-8, scale=True)`
+
+Bound-aware KKT residual for maximize F(t)=rho^2 subject to:
+
+t_mins[i] <= tvec[i] <= t_maxes[i],  sum(tvec)=t_budget.
+
+<ins>Returns</ins>
+
+`eps_kkt` : `float`
+
+scalar residual (scaled if `scale=True`)
+
+`info` : `dict`
+
+dictionary of estimated interior Lagrange multiplier, residual vector, feasibility, active sets
