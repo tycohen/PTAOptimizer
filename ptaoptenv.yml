@@ -1,0 +1,28 @@
+name: ptaoptenv
+channels:
+  - conda-forge
+dependencies:
+  - astropy
+  - cma
+  - ipykernel
+  - ipython
+  - ipython_genutils
+  - ipywidgets
+  - jupyter
+  - matplotlib
+  - matplotlib-base
+  - numpy	
+  - pandas
+  - parameterized
+  - pip
+  - pylint
+  - pytest
+  - python=3.9
+  - scipy
+  - threadpoolctl
+  - xlsxwriter	
+  - pip:
+    - openpyxl
+    - psrqpy
+#    - pyne2001 # might need to install after, make sure `export FC=gfortran` 
+

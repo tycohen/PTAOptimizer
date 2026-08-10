@@ -1,7 +1,23 @@
 
 # PTAOptimizer
 
-A python package for optimizing Pulsar Timing Array observations
+A python package for optimizing Pulsar Timing Array observations. Estimate timing precision with a single instrument, choose the optimal instrument among multiple combinations for a given pulsar, optimize pulsars over observing frequency, or optimize the PTA over integration time that maximize gravitational wave background sensitivity.
+
+---
+---
+## Installation
+
+`ptaoptimizer` will eventually be available as a `conda` package. For now, install and activate the `ptaoptenv` `conda` environment with
+
+```
+conda env create -f ptaoptenv.yml
+conda activate ptaoptenv
+```
+
+and add PTAOptimizer/src to your `PYTHONPATH`. You will also need to clone
+[FrequencyOptimizer](https://github.com/mtlam/FrequencyOptimizer) and add it to
+your `PYTHONPATH` as well as [Hasasia](https://github.com/Hazboun6/hasasia),
+which can be installed with `pip` (the version on PyPI is not compatible with `ptaoptimizer`).
 
 ---
 ---
