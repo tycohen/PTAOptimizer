@@ -7,10 +7,10 @@ import numpy as np
 import parameterized as ptzd
 import hasasia.sensitivity as hsen
 import hasasia.sim as hsim
-from pulsar import Pulsar
-from pta import PTA
-import gravitational_waves as gw
-import optimize
+from ptaoptimizer.pulsar import Pulsar
+from ptaoptimizer.pta import PTA
+import ptaoptimizer.gravitational_waves as gw
+from ptaoptimizer import optimize
 
 class test_OptimizeTime_state_when_using_LUT(unittest.TestCase):
     """

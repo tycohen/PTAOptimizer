@@ -1,6 +1,6 @@
 import unittest
-from pta import PTA
-from pulsar import Pulsar
+from ptaoptimizer.pta import PTA
+from ptaoptimizer.pulsar import Pulsar
 import parameterized as ptzd
 
 '''

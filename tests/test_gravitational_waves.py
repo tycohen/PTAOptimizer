@@ -8,9 +8,9 @@ from copy import deepcopy
 import parameterized as ptzd
 import hasasia.sensitivity as hsen
 import hasasia.sim as hsim
-from pulsar import Pulsar
-from pta import PTA
-import gravitational_waves as gw
+from ptaoptimizer.pulsar import Pulsar
+from ptaoptimizer.pta import PTA
+import ptaoptimizer.gravitational_waves as gw
 
 class test_update_noise_spectra_approx(unittest.TestCase):
 

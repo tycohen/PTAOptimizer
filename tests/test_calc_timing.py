@@ -4,9 +4,9 @@ Integration and unit tests for calc_timing module
 import pytest
 import numpy as np
 import parameterized as ptzd
-from pulsar import Pulsar
-from pta import PTA
-from calc_timing import calc_timing
+from ptaoptimizer.pulsar import Pulsar
+from ptaoptimizer.pta import PTA
+from ptaoptimizer.calc_timing import calc_timing
 
 def _write_rxspec(rxfile_path, nus):
     """

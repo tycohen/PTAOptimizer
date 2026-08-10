@@ -8,8 +8,8 @@ from threadpoolctl import threadpool_limits
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 import frequencyoptimizer as fop
-from telescope import Telescope
-import observatory_ops as oops
+from .telescope import Telescope
+from . import observatory_ops as oops
 
 def calc_timing(pta,
                 nus,

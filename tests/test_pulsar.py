@@ -3,7 +3,7 @@ Unit tests for Pulsar class
 """
 
 import unittest
-from pulsar import Pulsar
+from ptaoptimizer.pulsar import Pulsar
 import parameterized as ptzd
 
 class test_Pulsar__init__(unittest.TestCase):

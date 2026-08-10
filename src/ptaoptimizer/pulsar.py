@@ -1,5 +1,5 @@
 import numpy as np
-import gravitational_waves as gw
+from . import gravitational_waves as gw
 
 class Pulsar(object):
     """
