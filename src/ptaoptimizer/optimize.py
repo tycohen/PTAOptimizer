@@ -880,317 +880,6 @@ class OptimizeTime(object):
         _, grad = self.wn_rn_objective_and_grad(t_vec, Q_fk, psrdict)
         return grad
 
-    def dependent_pulsar_for_equality_reparam(self,
-                                              Qmat,
-                                              t_ref=None,
-                                              eps_act=1e-10,
-                                              eps_score=1e-30):
-        """
-        Choose dependent index k for equality-elimination reparam using
-        score = slack / (eps + |gradF_i - median(gradF)|).
-
-        Uses WN-only grad (wn_objective_and_grad). Later you can swap this
-        to full-objective grad with the same interface.
-        """
-        N = len(self.pta.psrlist)
-        B = float(self.t_int_maxtot)
-        tmin = float(self.t_int_min)
-        tmax = np.asarray(self.t_int_max, float).reshape(N)
-
-        # Reference point
-        if t_ref is None:
-            t_ref = np.full(N, B / N, dtype=float)
-        t_ref = self.project_to_budget_equality(t_ref)
-
-        # Raw gradient at reference
-        _, gradF = self.wn_objective_and_grad(t_ref, Qmat)
-        gradF = np.asarray(gradF, dtype=float)
-
-        # Slack at reference (distance to nearest bound)
-        slack_lo = t_ref - tmin
-        slack_hi = tmax - t_ref
-        slack = np.minimum(slack_lo, slack_hi)
-
-        # Avoid choosing a pulsar already (near) active by eps_act
-        at_lo = t_ref <= (tmin + eps_act)
-        at_hi = t_ref >= (tmax - eps_act)
-        active = at_lo | at_hi
-
-        # Robust center of gradients: median over non-active entries if possible
-        if np.any(~active):
-            g_med = float(np.median(gradF[~active]))
-        else:
-            g_med = float(np.median(gradF))
-
-        # Score formula
-        denom = eps_score + np.abs(gradF - g_med)
-        score = slack / denom
-
-        # Invalidate active / zero-slack / non-finite candidates
-        bad = active | (slack <= 0.0) | (~np.isfinite(score))
-        score = score.copy()
-        score[bad] = -np.inf
-
-        k = int(np.argmax(score))
-
-        # If everything is invalid (should be rare), fall back to max slack
-        if not np.isfinite(score[k]):
-            slack2 = slack.copy()
-            slack2[~np.isfinite(slack2)] = -np.inf
-            k = int(np.argmax(slack2))
-
-        return k
-
-    def _reparam_split_indices(self, k):
-        """Return list of free indices (all except k), in ascending order."""
-        N = len(self.pta.psrlist)
-        if k < 0 or k >= N:
-            raise ValueError(f"k out of range: {k} for N={N}")
-        idx_free = [i for i in range(N) if i != k]
-        return idx_free
-
-    def t_from_free_y(self, y, k):
-        """
-        Map reduced variable y (= t for all i != k) to full feasible candidate t
-        by setting:
-            t_i = y_i for i != k
-            t_k = B - sum_{i != k} t_i
-        Does NOT clip; caller decides how to handle infeasibility.
-        """
-        y = np.asarray(y, dtype=float)
-        N = len(self.pta.psrlist)
-        idx_free = self._reparam_split_indices(k)
-        if y.shape != (len(idx_free),):
-            raise ValueError(f"y must have shape ({len(idx_free)},), got {y.shape}")
-
-        B = float(self.t_int_maxtot)
-
-        t = np.empty(N, dtype=float)
-        t[idx_free] = y
-        t[k] = B - float(np.sum(y))
-        return t
-
-    def free_y_from_t(self, t, k):
-        """Inverse map: drop component k."""
-        t = np.asarray(t, dtype=float)
-        N = len(self.pta.psrlist)
-        if t.shape != (N,):
-            raise ValueError(f"t must have shape ({N},), got {t.shape}")
-        idx_free = self._reparam_split_indices(k)
-        return t[idx_free].copy()
-
-    def reparam_free_bounds(self, k):
-        """
-        Bounds for y variables in reduced problem.
-        Since y_i are literally t_i for i != k, bounds are just box bounds:
-            tmin <= y_i <= tmax_i
-        The dependent feasibility (t_k bounds) is handled separately (penalty).
-        """
-        N = len(self.pta.psrlist)
-        tmin = float(self.t_int_min)
-        tmax = np.asarray(self.t_int_max, dtype=float).reshape(N)
-        idx_free = self._reparam_split_indices(k)
-        bounds = [(tmin, float(tmax[i])) for i in idx_free]
-        return bounds
-
-    def _dependent_bound_violation(self, t, k):
-        """
-        Return (v, side) where v is signed violation magnitude for t_k:
-          - if t_k < tmin: v = tmin - t_k > 0   (lower violation)
-          - if t_k > tmax_k: v = t_k - tmax_k > 0 (upper violation)
-          - else: v = 0
-        side in {"lo","hi",None}
-        """
-        tmin = float(self.t_int_min)
-        tmax = float(np.asarray(self.t_int_max, dtype=float).reshape(-1)[k])
-        tk = float(t[k])
-        if tk < tmin:
-            return (tmin - tk), "lo"
-        if tk > tmax:
-            return (tk - tmax), "hi"
-        return 0.0, None
-
-    def wn_objective_and_grad_reparam_y(
-        self,
-        y,
-        Qmat,
-        k,
-        dep_penalty_weight=0.0,
-        return_debug=False
-    ):
-        y = np.asarray(y, dtype=float)
-        idx_free = self._reparam_split_indices(k)
-
-        # Build full t
-        t = self.t_from_free_y(y, k)
-        used_penalty = False
-        # ---- EARLY GUARD: if dependent violates bounds, DO NOT evaluate base objective ----
-        if dep_penalty_weight and dep_penalty_weight > 0.0:
-            v, side = self._dependent_bound_violation(t, k)
-            if v > 0.0:
-                used_penalty = True
-                w = float(dep_penalty_weight)
-
-                # Penalty objective only
-                F_pen = -w * (v ** 2)
-
-                # dv/dt_k: lo => -1, hi => +1
-                dv_dtk = -1.0 if side == "lo" else +1.0
-                dP_dtk = 2.0 * w * v * dv_dtk
-
-                # Early-guard returns only (-P)
-                # so grad is +dP/dt_k for every y_i
-                grad_y = np.full(len(idx_free), +dP_dtk, dtype=float)
-
-                # Return penalty-only objective/grad (feasibility restoration step)
-                if return_debug:
-                    return (float(F_pen),
-                            grad_y,
-                            {"used_penalty": True,
-                             "v": float(v),
-                             "side": side})
-                return float(F_pen), np.asarray(grad_y, dtype=float)
-
-        # ---- If dependent is feasible, evaluate real objective/grad ----
-        F, gradF_t = self.wn_objective_and_grad(t, Qmat)
-        gradF_t = np.asarray(gradF_t, dtype=float)
-
-        # Map gradient: dF/dy_i = dF/dt_i - dF/dt_k
-        gk = float(gradF_t[k])
-        grad_y = gradF_t[idx_free] - gk
-        if return_debug:
-            v, side = self._dependent_bound_violation(t, k)
-            return (float(F),
-                    np.asarray(grad_y, dtype=float),
-                    {"used_penalty": False,
-                     "v": float(v),
-                     "side": side})
-        return float(F), np.asarray(grad_y, dtype=float)
-
-    def maximize_snr_reparam_lbfgsb(
-        self,
-        t0=None,
-        k=None,
-        dep_penalty_weight=1e6,
-        maxiter=500,
-        gtol=1e-6,
-        verbose=False,
-        return_history=False,
-        logpath="."
-    ):
-        """
-        Maximize WN-only objective with equality eliminated by choosing a
-        dependent pulsar index k.
-
-        Uses scipy.optimize.minimize with L-BFGS-B on y = t_{i!=k}.
-
-        The equality sum(t)=B is enforced exactly via the reparam.
-        Dependent bound feasibility t_k in [tmin, tmax_k] is enforced via
-        a smooth quadratic penalty (weight dep_penalty_weight).
-        """
-        self._lut_check()
-        N = len(self.pta.psrlist)
-        B = float(self.t_int_maxtot)
-        Qmat = self.calc_Qmat()
-        # pick k if not given
-        if k is None:
-            # help the heuristic by using a feasible reference point
-            if t0 is None:
-                t_ref = np.full(N, B / N, dtype=float)
-            else:
-                t_ref = np.asarray(t0, dtype=float)
-            t_ref = self.project_to_budget_equality(t_ref)
-            k = self.dependent_pulsar_for_equality_reparam(Qmat, t_ref=t_ref)
-        if verbose:
-            print("Dependent index k:", k, "pulsar:", self.pta.psrlist[k].name)
-        idx_free = self._reparam_split_indices(k)
-
-        # initial feasible-ish t, then y0 = drop(k)
-        if t0 is None:
-            t0 = np.full(N, B / N, dtype=float)
-        t0 = self.project_to_budget_equality(t0)
-        y0 = self.free_y_from_t(t0, k)
-
-        bounds = self.reparam_free_bounds(k)
-
-        eval_log = []
-        last = {"y": None, "F": None, "g": None, "t": None, "dbg": None}
-
-        def eval_at(y):
-            y = np.asarray(y, float)
-            if last["y"] is not None and np.array_equal(y, last["y"]):
-                return last["F"], last["g"], last["t"], last["dbg"]
-
-            F, g, dbg = self.wn_objective_and_grad_reparam_y(
-                y, Qmat, k,
-                dep_penalty_weight=dep_penalty_weight,
-                return_debug=True,          # <- you add this flag
-            )
-            t = self.t_from_free_y(y, k)
-
-            last.update({"y": y.copy(), "F": float(F), "g": np.asarray(g, float), "t": t, "dbg": dbg})
-
-            eval_log.append({
-                "F": float(F),
-                "gnorm_inf_y": float(np.max(np.abs(g))),
-                "used_penalty": bool(dbg["used_penalty"]),
-                "dep_violation": float(dbg["v"]),
-                "dep_violation_side": dbg["side"],
-                "t_dep": float(t[k]),
-            })
-            return last["F"], last["g"], last["t"], last["dbg"]
-
-        def fun(y):
-            F, g, t, dbg = eval_at(y)
-            return -F
-
-        def jac(y):
-            F, g, t, dbg = eval_at(y)
-            return -g
-        
-        res = minimize(
-            fun=fun,
-            x0=y0,
-            jac=jac,
-            method="L-BFGS-B",
-            bounds=bounds,
-            options={
-                "maxiter": int(maxiter),
-                "gtol": float(gtol),
-                "disp": bool(verbose),
-            },
-            callback=None
-        )
-
-        # final safety: if dependent violated slightly, you’ll see it in diagnostics
-        # (don’t silently clip here; clipping breaks equality).
-        y_star = np.asarray(res.x, dtype=float)
-        F_star, g_star, t_star, dbg_star = eval_at(y_star)
-        info = {
-            "success": bool(res.success),
-            "status": int(res.status),
-            "message": str(res.message),
-            "n_iter": int(getattr(res, "nit", -1)),
-            "n_eval": int(getattr(res, "nfev", -1)),
-            "k_dependent": int(k),
-            "t": t_star,
-            "F": float(F_star),
-            "raw_result": res,
-        }
-        info["eval_log"] = eval_log
-        info["eval_log_summary"] = {
-            "n_eval": len(eval_log),
-            "n_penalty": int(sum(e["used_penalty"] for e in eval_log)),
-            "max_dep_violation": float(max(e["dep_violation"]
-                                           for e in eval_log)) if eval_log else 0.0,
-            "min_t_dep": float(min(e["t_dep"]
-                                   for e in eval_log)) if eval_log else np.nan,
-            "max_t_dep": float(max(e["t_dep"]
-                                   for e in eval_log)) if eval_log else np.nan,
-        }
-
-        return t_star, float(F_star), info
-    
     def wn_kkt_report(self, Qmat, t, eps_act=1e-6):
         """
         Return a dict of metric for white noise only
@@ -1532,7 +1221,6 @@ class OptimizeTime(object):
                                     nsamp=100,
                                     maxiter=500,
                                     spiky_delta_t=3600.,
-                                    k_depdt_lbfgsb=None,
                                     init_trustrad=1e4,
                                     init_trustconstrpen=1e3,
                                     trustconstr_gtol=1e-8,
@@ -1545,7 +1233,7 @@ class OptimizeTime(object):
         """
         An optimal solution stability diagnostic to test sensitivity
         to optimizer initial conditions.
-        Run nsamp gradient optimizers (trust-constr or L-BFGS-B)
+        Run nsamp gradient optimizers (trust-constr)
         with randomly sampled initial time vectors either 'spiky'
         (allocated to one pulsar near it's upper bound) or 'uniform'
         on the feasible polytope that obey the budget. Supports
@@ -1563,7 +1251,7 @@ class OptimizeTime(object):
                  each random start
         """
         valid_samplers = ("spiky", "uniform")
-        valid_optimizers = ("trust-constr", "l-bfgs-b")
+        valid_optimizers = ("trust-constr")
         if optimizer.lower() not in valid_optimizers:
             raise ValueError("{} is not a valid optimizer. "
                              "Valid optimizers are {}".format(optimizer,
@@ -1574,9 +1262,6 @@ class OptimizeTime(object):
                              "Valid noise models are {}".format(noisemodel,
                                                                 valid_noisemodels))
         N = len(self.pta.psrlist)
-        if optimizer.lower() == "l-bfgs-b" and noisemodel.lower() == "wnrn":
-            raise NotImplementedError("WN+RN not currently implemented "
-                                      "for L-BFGS-B")
         if sample_type == "spiky":
             t0s = samp.spiky_t0_vec(nsamp, N, self.t_int_max, self.t_int_min,
                                     self.t_int_maxtot, spiky_delta_t)            
@@ -1595,13 +1280,6 @@ class OptimizeTime(object):
         t_opts = []
         for i, t0 in enumerate(t0s_proj):
             print("multistart iter {}/{}".format(i + 1, nsamp))
-            if optimizer.lower() == "l-bfgs-b":
-                t_opt, f_opt, debug = self.maximize_snr_reparam_lbfgsb(
-                    t0=t0,
-                    maxiter=maxiter,
-                    k=k_depdt_lbfgsb,
-                    verbose=vverbose,
-                    return_history=True)
             if optimizer.lower() == "trust-constr":
                 if vverbose:
                     vverbose = 2
