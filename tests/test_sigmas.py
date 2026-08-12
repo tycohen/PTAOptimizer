@@ -2,17 +2,18 @@
 Consistency/integration tests for the values in Pulsar.sigmas dicts
 """
 import numpy as np
-import unittest2
-import cPickle
+import unittest
+import pickle
 
-class Test_sigma_tot_eq_quadsum(unittest2.TestCase):
+@unittest.skip("NG15yr.pta no longer included in repo. Will need to have a test object of PTA and Pulsars, run calc_timing on database of instruments/specs, then run this test.")
+class Test_sigma_tot_eq_quadsum(unittest.TestCase):
     """
     Parameterized test to check that for all visible pulsars, with all receiver
     combos, sigma_tot ** 2 = sigma_dm ** 2 + sigma_tel ** 2
     """
     def setUp(self):
         with open("NG15yr.pta" ,"rb") as f:
-            self.pta = cPickle.load(f)
+            self.pta = pickle.load(f, encoding="latin1")
         self.rcvr_keys = self.pta.psrlist[0].get_instr_keys()
 
     def test_sigma_tot_eq_quadsum(self):
@@ -23,5 +24,5 @@ class Test_sigma_tot_eq_quadsum(unittest2.TestCase):
                 np.testing.assert_allclose(sigma_tot, quadsum)
 
 if __name__ == '__main__':
-    unittest2.main()
+    unittest.main()
         

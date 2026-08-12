@@ -1,4 +1,5 @@
 import numpy as np
+from . import gravitational_waves as gw
 
 class Pulsar(object):
     """
@@ -14,6 +15,8 @@ class Pulsar(object):
             dispersion measure in pc cm^-3
     dec : float
             declination in degrees
+    ra : float
+            right ascension in degrees
     dtd : float
             scintillation timescale in seconds
     dnud : float
@@ -45,12 +48,21 @@ class Pulsar(object):
     telescope_noise : dict
                 dictionary of FrequencyOptimizer.TelescopeNoise objects
                 for each instrument
-        """
+    optimum : dict
+              dictionary of optimized parameters for each instrument
+    t_int : dict
+            dictionary of integration times for each instrument
+    redamp : float
+            dimensionless strain pulsar red noise amplitude
+    redgamma : float
+            positive pulsar red noise PSD spectral index
+    """
     def __init__(self,
                  name=None,
                  period=None,
                  dm=None,
                  dec=None,
+                 ra=None,
                  dtd=None,
                  dnud=None,
                  taud=None,
@@ -65,6 +77,10 @@ class Pulsar(object):
                  template=None,
                  sigmas=None,
                  telescope_noise=None,
+                 optimum=None,
+                 t_int=None,
+                 redamp=None,
+                 redgamma=None,
                  *args,
                  **kwargs):
         """
@@ -75,6 +91,7 @@ class Pulsar(object):
         self.period = period
         self.dm = dm
         self.dec = dec
+        self.ra = ra
         self.dtd = dtd
         self.dnud = dnud
         self.taud = taud
@@ -87,26 +104,49 @@ class Pulsar(object):
         self.sig_j_single = sig_j_single
         self.parfile = parfile
         self.template = template
-        self.sigmas = {}
-        self.telescope_noise = {}
+        self.sigmas = {} if sigmas is None else dict(sigmas)
+        if telescope_noise is None:
+            self.telescope_noise = {}
+        else:
+            self.telescope_noise = dict(telescope_noise)
+        self.optimum = {} if optimum is None else dict(optimum)
+        self.t_int = {} if t_int is None else dict(t_int)
+        self.redamp = redamp
+        self.redgamma = redgamma
 
+    @property
+    def redalpha(self):
+        """
+        Negative strain spectral index
+        """
+        if self.redamp is None or self.redgamma is None:
+            return None
+        if self.redamp > 0. and self.redgamma > 0.:
+            _, alpha = gw.rednoise_psd2charstrain(self.redamp, self.redgamma)
+        else:
+            alpha = 0.
+        return alpha
+        
     def sigma_jitter(self, t_int):
         """Return intrinsic jitter noise (in us)
         for given integration time in seconds"""
         n_pulses = t_int / self.period
         return self.sig_j_single / np.sqrt(n_pulses)            
 
-    def add_sigmas(self, instr_name, sigma_tup):
+    def add_sigmas(self, instr_name, sigma_dict):
         """instr_name : str
                         name of timing instrument
-        sigma_tup : tuple
-                        tuple of RMS components"""
+        sigma_dict : dict
+                        dictionary of RMS components"""
         keys = ['sigma_tot',
                 'sigma_white',
                 'sigma_dm',
                 'sigma_tel',
                 'sigma_rn']
-        self.sigmas.update({instr_name: dict(zip(keys, sigma_tup))})
+        if not all([k in list(sigma_dict.keys()) for k in keys]):
+            keystr = ", ".join(keys)
+            raise KeyError("'sigma_dict' must contain the keys: {}".format(keystr))
+        self.sigmas.update({instr_name: sigma_dict})
 
     def get_instr_keys(self):
         return [k for k in self.sigmas]
