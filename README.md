@@ -546,18 +546,36 @@ move +delta_t from j -> i (i gains time, j loses time), keeping sum fixed.
 swap indices array ([incr, decr]), swap time vectors, delta F
 
 ---
-`kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget, tol=1e-8, scale=True)`
+`kkt_lagrangian_residual(tvec, scaled_gradF, budget, budget_lagmult, bounds_lagmult)`
+KKT stationarity and budget equality feasibility residual for minimizing $F(\vec{t_\mathrm{int}})=-\rho(\vec{t_\mathrm{int}})^2/s$ subject to
 
-Bound-aware KKT residual for maximize F(t)=rho^2 subject to:
+$t_{\mathrm{min},i} \leq t_{\mathrm{int},i} \leq t_{\mathrm{max},i},\quad
+\sum_i t_{\mathrm{int},i} = B$.
 
-t_mins[i] <= tvec[i] <= t_maxes[i],  sum(tvec)=t_budget.
+<ins>Parameters</ins>
+
+`tvec` : `(Npsr,) numpy.ndarray`
+
+vector of integration times (s)
+
+`scaled_gradF` : `(Npsr,) numpy.ndarray`
+
+gradient of scaled objective
+
+`budget` : `float`
+
+time allocation budget (s)
+
+`budget_lagmult` : `float`
+
+budget equality Lagrangian multiplier
+
+`bounds_lagmult` : `(Npsr,) numpy.ndarray`
+
+per-pulsar bounds inequality Lagrangian multipliers
 
 <ins>Returns</ins>
 
 `eps_kkt` : `float`
 
-scalar residual (scaled if `scale=True`)
-
-`info` : `dict`
-
-dictionary of estimated interior Lagrange multiplier, residual vector, feasibility, active sets
+stationarity and feasibility normalized KKT residual
