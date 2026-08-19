@@ -1460,3 +1460,42 @@ def kkt_residual_box_eq(gradF, tvec, t_mins, t_maxes, t_budget,
         n_int=int(np.sum(interior)),
     )
     return eps_kkt, info
+
+def kkt_lagrangian_residual(tvec, scaled_gradF, budget,
+                            budget_lagmult, bounds_lagmult):
+    """
+    KKT stationarity and budget equality feasibility residual for minimize :math:`F(\vec{t_\mathrm{int}})=-\rho(\vec{t_\mathrm{int}})^2/s` subject to
+
+    .. math::
+    t_{\mathrm{min},i} \leq t_{\mathrm{int},i} \leq t_{\mathrm{max},i},\quad
+    \sum_i t_{\mathrm{int},i} = B.
+
+    Parameters:
+    ----------
+    tvec : (Npsr,) numpy.ndarray
+        vector of integration times (s)
+    scaled_gradF : (Npsr,) numpy.ndarray
+        gradient of scaled objective
+    budget : float
+        time allocation budget (s)
+    budget_lagmult : float
+        budget equality Lagrangian multiplier
+    bounds_lagmult : (Npsr,) numpy.ndarray
+        per-pulsar bounds inequality Lagrangian multipliers
+
+    Returns:
+    -------
+    eps_kkt : float
+        stationarity and feasibility normalized KKT residual
+    """
+    t = np.asarray(tvec, float)
+    gradF = np.asarray(scaled_gradF, float)
+    mu = np.asarray(bounds_lagmult, float)
+    resid = gradF + budget_lagmult + mu
+    r_inf = np.max(np.abs(resid))
+    stat_denom = max(1.0, np.max(np.abs(gradF)),
+                     abs(budget_lagmult), np.max(np.abs(mu)))
+    feas = abs(np.sum(t) - budget)
+    feas_denom = max(1.0, abs(budget))
+    eps_kkt = max(r_inf / stat_denom, feas / feas_denom)
+    return eps_kkt
