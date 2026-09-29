@@ -129,6 +129,7 @@ class PTA(object):
                          longtable=False,
                          fontsize=r"scriptsize",
                          comments_macro="table caption",
+                         endashes_in_names=True,
                          footnote_dict=None):
         """
         Make a publication-quality AASTex deluxetable
@@ -150,6 +151,8 @@ class PTA(object):
             latex named font size (no backslash)
         comments_macro : str
             optional custom latex macro for inserting content into \tablecomments
+        endashes_in_names : bool
+            replace all hyphens in pulsar names with en-dashes
         """
         if not path.isdir(savedir):
             raise FileNotFoundError("'savedir' {} does not exist.".format(savedir))
@@ -159,7 +162,9 @@ class PTA(object):
         psrs_incl = sorted([p for p in self.psrlist if p.name not in exclude_names],
                            key=lambda p: float(p.name[1:5]))
         npsr = len(psrs_incl)
-        name_column = {"attr": "name", "label": "Pulsar", "unit": "", "fmt": "{}"}
+        name_column = {
+            "attr": "name", "label": "Pulsar", "unit": "",
+            "fmt": fmt_repl_endash if endashes_in_names else "{}"}
         cols = [
             name_column,
             # {"attr": "ra", "label": "R.A.", "unit": r"($^\circ$)",
@@ -274,6 +279,9 @@ class PTA(object):
                 out.write(table)
         return table
 
+def fmt_repl_endash(s):
+    return "{}".format(s.replace("-", "--"))
+    
 def sci_latex(x, ndp=1):
     mant, exp = f"{x:.{ndp}e}".split("e")
     if exp in ("+00", "+01"):
