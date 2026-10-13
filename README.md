@@ -579,3 +579,28 @@ per-pulsar bounds inequality Lagrangian multipliers
 `eps_kkt` : `float`
 
 stationarity and feasibility normalized KKT residual
+
+---
+---
+## Citations
+
+If you use PTAOptimizer in work that results in a publication, please use the following attribution:
+
+```
+@ARTICLE{Cohen2026PTAOptimizer,
+       author = {{Cohen}, Tyler and {Demorest}, Paul B. and {Baier}, Jeremy G. and {Lynch}, Ryan S. and {Ransom}, Scott M. and {Lam}, Michael T. and {Agazie}, Gabriella and {Anumarlapudi}, Akash and {Archibald}, Anne M. and {Arzoumanian}, Zaven and {Baker}, Paul T. and {Battaglia}, Ava L. and {Brook}, Paul R. and {Brueggemann}, Anabelle L. and {Cromartie}, H. Thankful and {Crowter}, Kathryn and {DeCesar}, Megan E. and {Dolch}, Timothy and {Ferrara}, Elizabeth C. and {Fiore}, William and {Fonseca}, Emmanuel and {Freedman}, Gabriel E. and {Garver-Daniels}, Nate and {Gentile}, Peter A. and {Glaser}, Joseph and {Good}, Deborah C. and {Hazboun}, Jeffrey S. and {Jennings}, Ross J. and {Jones}, Megan L. and {Kaplan}, David L. and {Kerr}, Matthew and {Lorimer}, Duncan R. and {Luo}, Jing and {Marquis}, Hugo E. and {McEwen}, Alexander and {McLaughlin}, Maura A. and {McMann}, Natasha and {Meyers}, Bradley W. and {Ng}, Cherry and {Nice}, David J. and {Pennucci}, Timothy T. and {Perera}, Benetge B.~P. and {Pol}, Nihan S. and {Radovan}, Henri A. and {Ray}, Paul S. and {Schmiedekamp}, Ann and {Schmiedekamp}, Carl and {Shapiro-Albert}, Brent J. and {Stairs}, Ingrid H. and {Stovall}, Kevin and {Susobhanan}, Abhimanyu and {Swiggum}, Joseph K. and {Wahl}, Haley M.},
+        title = "{Optimal Pulsar Timing Array Strategies with the Deep Synoptic Array}",
+      journal = {arXiv e-prints},
+     keywords = {High Energy Astrophysical Phenomena, Instrumentation and Methods for Astrophysics},
+         year = 2026,
+        month = sep,
+          eid = {arXiv:2610.00836},
+        pages = {arXiv:2610.00836},
+          doi = {10.48550/arXiv.2610.00836},
+archivePrefix = {arXiv},
+       eprint = {2610.00836},
+ primaryClass = {astro-ph.HE},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv261000836C},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
